@@ -1,4 +1,4 @@
-# Capstone Eye Tracker project
+# Eye Tracker project
 
 A high-precision, low-latency eye tracker prototype. Use cases include medical, marketing, sports performance coaching, gaming, day-to-day life, etc.
 
