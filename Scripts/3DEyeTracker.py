@@ -13,7 +13,7 @@ BUFFER_SIZE = 5  # Small enough to be responsive, large enough to stop jitter
 
 try:
     import gl_sphere
-    GL_SPHERE_AVAILABLE = True
+    GL_SPHERE_AVAILABLE = False # TODO: FIX GL_SPHERE LOGIC
 except ImportError:
     GL_SPHERE_AVAILABLE = False
     print("gl_sphere module not found. OpenGL rendering will be disabled.")
@@ -508,6 +508,14 @@ def compute_gaze_vector(x, y, center_x, center_y, screen_width=640, screen_heigh
     inner_radius = 1.0 / 1.05
     sphere_offset_x = (center_x / screen_width) * 2.0 - 1.0
     sphere_offset_y = 1.0 - (center_y / screen_height) * 2.0
+
+    # # TODO: For GL SPHERE
+    # fov_y_rad = np.radians(45.0)
+    # distance = 3.0
+    # half_height = np.tan(fov_y_rad / 2.0) * distance
+    # aspect_ratio = screen_width / max(1, screen_height)
+    # half_width = half_height * aspect_ratio
+
     sphere_center = np.array([sphere_offset_x * 1.5, sphere_offset_y * 1.5, 0.0])
 
     origin = ray_origin

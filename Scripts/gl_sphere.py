@@ -125,6 +125,14 @@ class SphereWidget(QOpenGLWidget):
         gl_x = (self.sphere_center_x / viewport_width) * 2.0 - 1.0
         gl_y = 1.0 - (self.sphere_center_y / viewport_height) * 2.0
 
+        fov_y_rad = np.radians(45.0)
+        distance = 3.0
+        half_height = np.tan(fov_y_rad / 2.0) * distance
+        aspect_ratio = viewport_width / max(1, viewport_height)
+        half_width = half_height * aspect_ratio
+
+        glTranslatef(gl_x * half_width, gl_y * half_height, 0.0)
+
         # Scale appropriately to match world space
         glTranslatef(gl_x * 1.5, gl_y * 1.5, 0.0)
         
@@ -283,7 +291,13 @@ def update_sphere_rotation(x, y, center_x, center_y, screen_width=640, screen_he
     # Compute sphere center offset in world space (same as in render)
     sphere_offset_x = (center_x / screen_width) * 2.0 - 1.0
     sphere_offset_y = 1.0 - (center_y / screen_height) * 2.0
-    sphere_center = np.array([sphere_offset_x * 1.5, sphere_offset_y * 1.5, 0.0])
+    fov_y_rad = np.radians(45.0)
+    distance = 3.0
+    half_height = np.tan(fov_y_rad / 2.0) * distance
+    aspect_ratio = screen_width / max(1, screen_height)
+    half_width = half_height * aspect_ratio
+
+    sphere_center = np.array([sphere_offset_x * half_width, sphere_offset_y * half_height, 0.0])
 
     # Ray origin and direction are defined in world space
     origin = ray_origin
@@ -321,7 +335,7 @@ def update_sphere_rotation(x, y, center_x, center_y, screen_width=640, screen_he
     # Convert screen center of sphere to world-space offset
     sphere_offset_x = (center_x / screen_width) * 2.0 - 1.0
     sphere_offset_y = 1.0 - (center_y / screen_height) * 2.0
-    sphere_center_offset = np.array([sphere_offset_x * 1.5, sphere_offset_y * 1.5, 0.0])
+    sphere_center_offset = np.array([sphere_offset_x * half_width, sphere_offset_y * half_height, 0.0])
 
     # Shift intersection point into the local coordinate space of the sphere
     intersection_local = intersection_point - sphere_center_offset
