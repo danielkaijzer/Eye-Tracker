@@ -201,6 +201,65 @@ def check_ellipse_goodness(binary_image, contour, debug_mode_on):
 
     return ellipse_goodness
 
+def _detect_pupil_adaptive(gray_frame, darkest_point):
+    """Fallback pupil detection using adaptive thresholding for IR washout."""
+    h, w = gray_frame.shape[:2]
+
+    # ROI size scales with frame dimensions (~40% of shorter dimension)
+    roi_half = int(min(h, w) * 0.2)
+    dx, dy = darkest_point
+    x1 = max(0, dx - roi_half)
+    y1 = max(0, dy - roi_half)
+    x2 = min(w, dx + roi_half)
+    y2 = min(h, dy + roi_half)
+    roi = gray_frame[y1:y2, x1:x2]
+
+    if roi.size == 0:
+        return None, None
+
+    # Adaptive threshold detects local contrast edges (works when pupil isn't darkest)
+    block = 15 if min(roi.shape[:2]) > 30 else 7
+    binary = cv2.adaptiveThreshold(
+        roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
+        blockSize=block, C=5
+    )
+
+    # Morphological close to fill glint holes inside pupil
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k, iterations=2)
+
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Area bounds scale with frame resolution
+    frame_area = h * w
+    min_area = frame_area * 0.002
+    max_area = frame_area * 0.05
+
+    best_contour = None
+    best_area = 0
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < min_area or area > max_area or len(cnt) < 5:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        if perimeter == 0:
+            continue
+        circularity = 4 * math.pi * area / (perimeter * perimeter)
+        if circularity > 0.4 and area > best_area:
+            best_area = area
+            best_contour = cnt
+
+    if best_contour is None:
+        return None, None
+
+    ellipse = cv2.fitEllipse(best_contour)
+    # Shift ellipse center back to full-frame coordinates
+    center_x = int(ellipse[0][0]) + x1
+    center_y = int(ellipse[0][1]) + y1
+    ellipse = ((center_x, center_y), ellipse[1], ellipse[2])
+    return (center_x, center_y), ellipse
+
+
 def detect_pupil(frame, gray_frame):
     """Detect pupil center and ellipse using multi-threshold approach."""
     darkest_point = get_darkest_area(frame)
@@ -238,7 +297,7 @@ def detect_pupil(frame, gray_frame):
                 best_contours = reduced
 
     if not best_contours:
-        return None, None
+        return _detect_pupil_adaptive(gray_frame, darkest_point)
 
     optimized = optimize_contours_by_angle(best_contours, gray_frame)
     if optimized is None or len(optimized) < 5:
