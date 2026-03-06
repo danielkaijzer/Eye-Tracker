@@ -1,0 +1,6 @@
+# Session files
+gaze_vector.txt
+
+# Cache stuff
+.vscode
+Scripts/__pycache__
