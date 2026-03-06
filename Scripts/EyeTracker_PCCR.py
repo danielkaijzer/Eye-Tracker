@@ -42,6 +42,10 @@ GLINT_MIN_AREA = 3            # min contour area for a glint blob
 GLINT_MAX_AREA = 150          # max contour area
 NUM_GLINTS = 2                # expected LED count
 
+# TODO: Tune these parameters after testing
+EXPECTED_GLINT_DIST = 12.0   # expected pixel distance between two IR LEDs
+GLINT_DIST_TOLERANCE = 8.0   # +/- tolerance for inter-glint distance
+
 PCCR_BUFFER_SIZE = 5          # frames of history
 pccr_buffer = deque(maxlen=PCCR_BUFFER_SIZE)  # recent valid PCCR vectors for median
 PCCR_JUMP_THRESH = 30.0       # max pixel jump from running median to accept
@@ -346,6 +350,14 @@ def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
     # Sort by distance to pupil, take closest NUM_GLINTS
     candidates.sort(key=lambda c: c[2])
     selected = candidates[:NUM_GLINTS]
+
+    # Validate inter-glint distance matches expected hardware spacing
+    if len(selected) == 2:
+        inter_dist = math.sqrt((selected[0][0] - selected[1][0])**2 +
+                               (selected[0][1] - selected[1][1])**2)
+        if abs(inter_dist - EXPECTED_GLINT_DIST) > GLINT_DIST_TOLERANCE:
+            selected = [selected[0]]
+
     glint_points = [(c[0], c[1]) for c in selected]
 
     # Centroid is average of selected glints
@@ -736,6 +748,7 @@ def process_camera():
     eye_cap.release()
     if external_cap is not None:
         external_cap.release()
+    udp_sock.close()
     cv2.destroyAllWindows()
 
 def process_video():
@@ -756,6 +769,7 @@ def process_video():
         elif key == ord(' '):
             cv2.waitKey(0)
     cap.release()
+    udp_sock.close()
     cv2.destroyAllWindows()
 
 def selection_gui():
