@@ -9,7 +9,23 @@ import sys
 import time
 
 gaze_buffer = [] # Moving average buffer
+screen_buffer = []
 BUFFER_SIZE = 5  # Small enough to be responsive, large enough to stop jitter
+
+calib_points_screen = []  # [(x,y), ...] in screen coords
+calib_vectors_eye = []    # [np.array([dx, dy, dz]), ...]
+calib_state = 0           # 0: Idle, >0: current target index (1-based)
+calib_total_points = 12   # 3x4 grid
+
+# Multi-sample collection state
+calib_collecting = False
+calib_collect_frames = []
+CALIB_SAMPLES = 15        # frames to collect per point
+CALIB_STD_THRESH = 0.015  # max std dev for a valid capture
+
+# Polynomial calibration coefficients (6 per axis)
+poly_coeffs_x = None
+poly_coeffs_y = None
 
 try:
     import gl_sphere
@@ -83,33 +99,12 @@ def apply_binary_threshold(image, darkestPixelValue, addedThreshold):
     return thresholded_image
 
 def get_darkest_area(image):
-    ignoreBounds = 20
-    imageSkipSize = 10
-    searchArea = 20
-    internalSkipSize = 5
-
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    min_sum = float('inf')
-    darkest_point = None
-
-    for y in range(ignoreBounds, gray.shape[0] - ignoreBounds, imageSkipSize):
-        for x in range(ignoreBounds, gray.shape[1] - ignoreBounds, imageSkipSize):
-            current_sum = np.int64(0)
-            num_pixels = 0
-            for dy in range(0, searchArea, internalSkipSize):
-                if y + dy >= gray.shape[0]:
-                    break
-                for dx in range(0, searchArea, internalSkipSize):
-                    if x + dx >= gray.shape[1]:
-                        break
-                    current_sum += gray[y + dy][x + dx]
-                    num_pixels += 1
-
-            if current_sum < min_sum and num_pixels > 0:
-                min_sum = current_sum
-                darkest_point = (x + searchArea // 2, y + searchArea // 2)
-
-    return darkest_point
+    blurred = cv2.blur(gray, (20, 20))
+    margin = 20
+    roi = blurred[margin:-margin, margin:-margin]
+    min_loc = cv2.minMaxLoc(roi)[3]
+    return (min_loc[0] + margin, min_loc[1] + margin)
 
 def mask_outside_square(image, center, size):
     x, y = center
@@ -441,24 +436,32 @@ def rotation_from_a_to_b(a, b):
     return R
 
 def update_gaze_circle_from_current_gaze():
-    global circle_x, circle_y, last_gaze_dir, calibrated
+    global circle_x, circle_y, last_gaze_dir, calibrated, screen_buffer
     if not calibrated or last_gaze_dir is None:
         return
-    
-    gaze_buffer.append(last_gaze_dir)
-    if len(gaze_buffer) > BUFFER_SIZE: gaze_buffer.pop(0)
-    avg_gaze = np.mean(gaze_buffer, axis=0)
-    avg_gaze /= np.linalg.norm(avg_gaze)
-
-    g = R_gaze_to_cam @ avg_gaze
-    if g[2] <= 1e-6:
+    if poly_coeffs_x is None or poly_coeffs_y is None:
         return
 
-    u = EXT_CX + EXT_FX * (g[0] / g[2])
-    v = EXT_CY - EXT_FY * (g[1] / g[2])
-    u = int(np.clip(u, 0, EXT_WIDTH - 1))
-    v = int(np.clip(v, 0, EXT_HEIGHT - 1))
-    circle_x, circle_y = u, v
+    g = last_gaze_dir
+    if abs(g[2]) < 1e-3:
+        return
+
+    gx = g[0] / g[2]
+    gy = g[1] / g[2]
+    feat = _build_poly_features(gx, gy)
+
+    u = feat @ poly_coeffs_x
+    v = feat @ poly_coeffs_y
+
+    screen_buffer.append((u, v))
+    if len(screen_buffer) > BUFFER_SIZE:
+        screen_buffer.pop(0)
+
+    avg_u = np.mean([p[0] for p in screen_buffer])
+    avg_v = np.mean([p[1] for p in screen_buffer])
+
+    circle_x = int(np.clip(avg_u, 0, EXT_WIDTH - 1))
+    circle_y = int(np.clip(avg_v, 0, EXT_HEIGHT - 1))
 
 def find_line_intersection(ellipse1, ellipse2):
     (cx1, cy1), (_, minor_axis1), angle1 = ellipse1
@@ -587,22 +590,6 @@ def compute_gaze_vector(x, y, center_x, center_y, screen_width=640, screen_heigh
     else:
         sphere_center_out = sphere_center
 
-    file_path = "gaze_vector.txt"
-    
-    def is_file_available(path):
-        try:
-            with open(path, "a"): return True
-        except IOError: return False
-
-    if is_file_available(file_path):
-        try:
-            with open(file_path, "w") as f:
-                all_values = np.concatenate((sphere_center_out, gaze_rotated))
-                csv_line = ",".join(f"{v:.6f}" for v in all_values)
-                f.write(csv_line + "\n")
-        except Exception as e:
-            pass
-
     return sphere_center_out, gaze_rotated
 
 def on_mouse_frame_with_rays(event, x, y, flags, param):
@@ -617,18 +604,191 @@ def on_mouse_frame_with_rays(event, x, y, flags, param):
             calibrated_sphere_center = last_sphere_center.copy()
             calibrated = True
 
-def calibrate_gaze_to_external():
-    global calibrated, R_gaze_to_cam, calibrated_sphere_center
-    global sphere_center_locked_2d, locked_model_center_avg, prev_model_center_avg
-    if last_gaze_dir is None or last_sphere_center is None:
-        return
+# def calibrate_gaze_to_external():
+#     global calibrated, R_gaze_to_cam, calibrated_sphere_center
+#     global sphere_center_locked_2d, locked_model_center_avg, prev_model_center_avg
+#     if last_gaze_dir is None or last_sphere_center is None:
+#         return
 
-    forward = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    R_gaze_to_cam = rotation_from_a_to_b(last_gaze_dir, forward)
-    calibrated_sphere_center = last_sphere_center.copy()
-    sphere_center_locked_2d = True
-    locked_model_center_avg = prev_model_center_avg
+#     forward = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+#     R_gaze_to_cam = rotation_from_a_to_b(last_gaze_dir, forward)
+#     calibrated_sphere_center = last_sphere_center.copy()
+#     sphere_center_locked_2d = True
+#     locked_model_center_avg = prev_model_center_avg
+#     calibrated = True
+
+def _build_poly_features(gx, gy):
+    """Build 2nd-degree polynomial feature row: [1, gx, gy, gx^2, gy^2, gx*gy]"""
+    return np.array([1.0, gx, gy, gx*gx, gy*gy, gx*gy])
+
+def compute_polynomial_calibration():
+    """Fit 2nd-degree polynomial from gaze vectors to screen coords (least-squares)."""
+    global poly_coeffs_x, poly_coeffs_y
+    n = len(calib_vectors_eye)
+    if n < 6:
+        print(f"Need at least 6 calibration points, have {n}.")
+        return False
+
+    A = np.zeros((n, 6))
+    bx = np.zeros(n)
+    by = np.zeros(n)
+    for i, (v, pt) in enumerate(zip(calib_vectors_eye, calib_points_screen)):
+        if abs(v[2]) < 1e-6:
+            continue
+        gx = v[0] / v[2]
+        gy = v[1] / v[2]
+        A[i] = _build_poly_features(gx, gy)
+        bx[i] = pt[0]
+        by[i] = pt[1]
+
+    cx, res_x, _, _ = np.linalg.lstsq(A, bx, rcond=None)
+    cy, res_y, _, _ = np.linalg.lstsq(A, by, rcond=None)
+    poly_coeffs_x = cx
+    poly_coeffs_y = cy
+
+    # Leave-one-out cross-validation
+    errors = []
+    for i in range(n):
+        A_loo = np.delete(A, i, axis=0)
+        bx_loo = np.delete(bx, i)
+        by_loo = np.delete(by, i)
+        cx_loo, _, _, _ = np.linalg.lstsq(A_loo, bx_loo, rcond=None)
+        cy_loo, _, _, _ = np.linalg.lstsq(A_loo, by_loo, rcond=None)
+        pred_x = A[i] @ cx_loo
+        pred_y = A[i] @ cy_loo
+        err = math.sqrt((pred_x - bx[i])**2 + (pred_y - by[i])**2)
+        errors.append(err)
+
+    avg_err = np.mean(errors)
+    max_err = np.max(errors)
+    print(f"Polynomial calibration fitted ({n} points).")
+    print(f"  LOO error: avg={avg_err:.1f}px, max={max_err:.1f}px")
+    if avg_err > 40:
+        print("  WARNING: High error — consider recalibrating.")
+
+    _save_calibration()
+    return True
+
+def _calibration_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_data.npz")
+
+def _history_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history.npz")
+
+def _save_calibration():
+    """Save polynomial coefficients and raw calibration data."""
+    global poly_coeffs_x, poly_coeffs_y
+    path = _calibration_path()
+    vectors = np.array(calib_vectors_eye)
+    points = np.array(calib_points_screen)
+    np.savez(path,
+             poly_coeffs_x=poly_coeffs_x,
+             poly_coeffs_y=poly_coeffs_y,
+             vectors=vectors,
+             points=points,
+             timestamp=time.time())
+    print(f"  Calibration saved to {path}")
+
+    # Append to history for future ML training
+    hist_path = _history_path()
+    if os.path.exists(hist_path):
+        old = np.load(hist_path, allow_pickle=True)
+        old_vectors = list(old['all_vectors'])
+        old_points = list(old['all_points'])
+    else:
+        old_vectors = []
+        old_points = []
+    old_vectors.append(vectors)
+    old_points.append(points)
+    np.savez(hist_path,
+             all_vectors=np.array(old_vectors, dtype=object),
+             all_points=np.array(old_points, dtype=object))
+    total_pts = sum(len(v) for v in old_vectors)
+    print(f"  History: {len(old_vectors)} sessions, {total_pts} total points.")
+
+def load_calibration():
+    """Load saved polynomial calibration. Returns True on success."""
+    global poly_coeffs_x, poly_coeffs_y, calibrated
+    path = _calibration_path()
+    if not os.path.exists(path):
+        print("No saved calibration found.")
+        return False
+    data = np.load(path, allow_pickle=True)
+    poly_coeffs_x = data['poly_coeffs_x']
+    poly_coeffs_y = data['poly_coeffs_y']
+    ts = float(data['timestamp'])
+    age_hrs = (time.time() - ts) / 3600
     calibrated = True
+    print(f"Calibration loaded (age: {age_hrs:.1f}h).")
+    if age_hrs > 24:
+        print("  WARNING: Calibration is >24h old. Consider recalibrating.")
+    return True
+
+def start_calibration():
+    global calib_state, calib_points_screen, calib_vectors_eye, calib_collecting, calib_collect_frames
+    global calib_total_points
+    calib_state = 1
+    calib_vectors_eye = []
+    calib_collecting = False
+    calib_collect_frames = []
+
+    # Generate 3x4 grid of calibration targets with margins
+    margin_x = 40
+    margin_y = 40
+    cols, rows = 4, 3
+    calib_points_screen = []
+    for r in range(rows):
+        for col in range(cols):
+            x = int(margin_x + col * (EXT_WIDTH - 2 * margin_x) / (cols - 1))
+            y = int(margin_y + r * (EXT_HEIGHT - 2 * margin_y) / (rows - 1))
+            calib_points_screen.append((x, y))
+    calib_total_points = len(calib_points_screen)
+    print(f"Calibration started ({calib_total_points} points). Look at the RED dot and press 'c'.")
+
+def begin_capture():
+    """Start multi-sample collection for the current calibration point."""
+    global calib_collecting, calib_collect_frames
+    calib_collecting = True
+    calib_collect_frames = []
+
+def tick_capture():
+    """Called each frame during collection. Returns True when done collecting."""
+    global calib_collecting, calib_collect_frames, calib_state, calibrated
+    if not calib_collecting:
+        return False
+    if last_gaze_dir is None:
+        return False
+
+    calib_collect_frames.append(last_gaze_dir.copy())
+    if len(calib_collect_frames) < CALIB_SAMPLES:
+        return False
+
+    # Collection complete — compute median and check quality
+    samples = np.array(calib_collect_frames)
+    std_dev = np.std(samples, axis=0)
+    max_std = np.max(std_dev)
+
+    if max_std > CALIB_STD_THRESH:
+        print(f"  High variance (std={max_std:.4f}). Retrying — hold still and press 'c'.")
+        calib_collecting = False
+        calib_collect_frames = []
+        return False
+
+    median_vec = np.median(samples, axis=0)
+    median_vec = median_vec / np.linalg.norm(median_vec)
+    calib_vectors_eye.append(median_vec)
+    calib_collecting = False
+    calib_collect_frames = []
+
+    if calib_state >= calib_total_points:
+        if compute_polynomial_calibration():
+            calibrated = True
+            print("Calibration Complete!")
+        calib_state = 0
+    else:
+        calib_state += 1
+        print(f"  Captured {len(calib_vectors_eye)}/{calib_total_points}. Look at next dot, press 'c'.")
+    return True
 
 def process_frame(frame):
     frame = crop_to_aspect_ratio(frame)
@@ -684,8 +844,8 @@ def process_camera():
     circle_x, circle_y = EXT_CX, EXT_CY
     calibrated = False
 
-    cv2.namedWindow("Original Eye Frame")
-    cv2.moveWindow("Original Eye Frame", 50, 50)
+    # cv2.namedWindow("Original Eye Frame")
+    # cv2.moveWindow("Original Eye Frame", 50, 50)
     cv2.namedWindow("Frame with Ellipse and Rays")
     cv2.moveWindow("Frame with Ellipse and Rays", 50, 600)
     cv2.setMouseCallback("Frame with Ellipse and Rays", on_mouse_frame_with_rays)
@@ -694,25 +854,49 @@ def process_camera():
         cv2.namedWindow("External Camera (Gaze)")
         cv2.moveWindow("External Camera (Gaze)", 720, 50)
 
+    print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
+
     while True:
         ret_eye, eye_frame = eye_cap.read()
         if not ret_eye:
             break
-            
+
         eye_frame = cv2.flip(eye_frame, 0)
-
         cv2.imshow("Original Eye Frame", eye_frame)
+        process_frame(eye_frame)
 
-        # Removed the cv2.flip(0) that was breaking AVFoundation's darkest_point detection!
-        process_frame(eye_frame)  
+        # Tick multi-sample collection if active
+        if calib_collecting:
+            tick_capture()
 
         if external_cap is not None:
             ret_ext, ext_frame = external_cap.read()
             if ret_ext:
                 ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
-                if calibrated:
+
+                if calib_state > 0:
+                    target = calib_points_screen[calib_state - 1]
+                    cv2.circle(ext_frame_resized, target, 15, (0, 0, 255), -1)
+                    # Draw small dots for all targets
+                    for i, pt in enumerate(calib_points_screen):
+                        if i < len(calib_vectors_eye):
+                            cv2.circle(ext_frame_resized, pt, 5, (0, 200, 0), -1)
+                        elif i != calib_state - 1:
+                            cv2.circle(ext_frame_resized, pt, 5, (100, 100, 100), -1)
+
+                    status_text = f"Point {calib_state}/{calib_total_points}"
+                    if calib_collecting:
+                        progress = len(calib_collect_frames)
+                        status_text += f" - collecting [{progress}/{CALIB_SAMPLES}]"
+                        cv2.circle(ext_frame_resized, target, 20, (0, 165, 255), 3)
+                    else:
+                        status_text += " - press 'c'"
+                    cv2.putText(ext_frame_resized, status_text,
+                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                elif calibrated:
                     update_gaze_circle_from_current_gaze()
-                cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 0, 255), -1)
+                    cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
+
                 cv2.imshow("External Camera (Gaze)", ext_frame_resized)
 
         key = cv2.waitKey(1) & 0xFF
@@ -720,8 +904,13 @@ def process_camera():
             break
         elif key == ord(' '):
             cv2.waitKey(0)
+        elif key == ord('l'):
+            load_calibration()
         elif key == ord('c'):
-            calibrate_gaze_to_external()
+            if calib_state == 0:
+                start_calibration()
+            elif not calib_collecting:
+                begin_capture()
 
     eye_cap.release()
     if external_cap is not None:
