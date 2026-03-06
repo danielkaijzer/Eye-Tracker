@@ -39,6 +39,10 @@ GLINT_MIN_AREA = 3            # min contour area for a glint blob
 GLINT_MAX_AREA = 150          # max contour area
 NUM_GLINTS = 2                # expected LED count
 
+pccr_buffer = []              # recent valid PCCR vectors for median
+PCCR_BUFFER_SIZE = 5          # frames of history
+PCCR_JUMP_THRESH = 30.0       # max pixel jump from running median to accept
+
 calibrated = False
 
 # External camera / screen params (for 640x480)
@@ -297,6 +301,31 @@ def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
 
     return glint_centroid, glint_points
 
+def smooth_pccr_vector(raw_vector):
+    """Reject outlier PCCR vectors that jump too far from the running median.
+
+    Returns the vector if accepted, or None if rejected.
+    """
+    global pccr_buffer
+
+    raw = np.array(raw_vector, dtype=float)
+
+    if len(pccr_buffer) == 0:
+        pccr_buffer.append(raw)
+        return raw
+
+    median = np.median(pccr_buffer, axis=0)
+    dist = np.linalg.norm(raw - median)
+
+    if dist > PCCR_JUMP_THRESH:
+        return None
+
+    pccr_buffer.append(raw)
+    if len(pccr_buffer) > PCCR_BUFFER_SIZE:
+        pccr_buffer.pop(0)
+
+    return raw
+
 def process_frame(frame):
     """PCCR pipeline: detect pupil, detect glints, compute pupil-glint vector."""
     global last_pccr_vector, last_pupil_center, last_glint_centroid
@@ -327,22 +356,31 @@ def process_frame(frame):
             # Compute PCCR vector
             dx = pupil_center[0] - glint_centroid[0]
             dy = pupil_center[1] - glint_centroid[1]
-            last_pccr_vector = np.array([dx, dy])
+            raw_pccr = np.array([dx, dy])
 
-            # Draw PCCR vector (cyan line from glint centroid through pupil)
-            gc = (int(glint_centroid[0]), int(glint_centroid[1]))
-            end_pt = (int(pupil_center[0] + dx), int(pupil_center[1] + dy))
-            cv2.line(frame, gc, end_pt, (255, 255, 0), 2)
+            accepted = smooth_pccr_vector(raw_pccr)
+            if accepted is not None:
+                last_pccr_vector = accepted
 
-            # Display PCCR vector text
-            pccr_text = f"PCCR: ({dx:.1f}, {dy:.1f})"
-            cv2.putText(frame, pccr_text, (10, frame.shape[0] - 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                # Draw PCCR vector (cyan line from glint centroid through pupil)
+                gc = (int(glint_centroid[0]), int(glint_centroid[1]))
+                end_pt = (int(pupil_center[0] + dx), int(pupil_center[1] + dy))
+                cv2.line(frame, gc, end_pt, (255, 255, 0), 2)
+
+                # Display PCCR vector text
+                pccr_text = f"PCCR: ({dx:.1f}, {dy:.1f})"
+                cv2.putText(frame, pccr_text, (10, frame.shape[0] - 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            else:
+                # Rejected outlier — hold last valid, show indicator
+                cv2.circle(frame, (15, 15), 8, (0, 0, 255), -1)
+                cv2.putText(frame, "SKIP", (28, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         else:
-            last_pccr_vector = None
+            # No glints detected — don't update last_pccr_vector (hold-last-valid)
             last_glint_centroid = None
     else:
-        last_pccr_vector = None
+        # No pupil detected — don't update last_pccr_vector (hold-last-valid)
         last_pupil_center = None
         last_glint_centroid = None
 
@@ -476,8 +514,9 @@ def load_calibration():
 
 def start_calibration():
     global calib_state, calib_points_screen, calib_vectors_eye, calib_collecting, calib_collect_frames
-    global calib_total_points
+    global calib_total_points, pccr_buffer
     calib_state = 1
+    pccr_buffer.clear()
     calib_vectors_eye = []
     calib_collecting = False
     calib_collect_frames = []
