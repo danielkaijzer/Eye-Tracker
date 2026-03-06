@@ -6,10 +6,13 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 import sys
 import time
+import socket
+import json
+from collections import deque
+udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-gaze_buffer = [] # Moving average buffer
-screen_buffer = []
 BUFFER_SIZE = 5  # Small enough to be responsive, large enough to stop jitter
+screen_buffer = deque(maxlen=BUFFER_SIZE)
 
 calib_points_screen = []  # [(x,y), ...] in screen coords
 calib_vectors_eye = []    # [np.array([dx, dy]), ...] PCCR vectors
@@ -39,8 +42,8 @@ GLINT_MIN_AREA = 3            # min contour area for a glint blob
 GLINT_MAX_AREA = 150          # max contour area
 NUM_GLINTS = 2                # expected LED count
 
-pccr_buffer = []              # recent valid PCCR vectors for median
 PCCR_BUFFER_SIZE = 5          # frames of history
+pccr_buffer = deque(maxlen=PCCR_BUFFER_SIZE)  # recent valid PCCR vectors for median
 PCCR_JUMP_THRESH = 30.0       # max pixel jump from running median to accept
 
 calibrated = False
@@ -104,7 +107,7 @@ def mask_outside_square(image, center, size):
     mask[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = 255
     return cv2.bitwise_and(image, mask)
 
-def optimize_contours_by_angle(contours, image):
+def optimize_contours_by_angle(contours):
     if len(contours) < 1:
         return contours
 
@@ -112,6 +115,7 @@ def optimize_contours_by_angle(contours, image):
     spacing = int(len(all_contours)/25)
     filtered_points = []
     centroid = np.mean(all_contours, axis=0)
+    cos_threshold = np.cos(np.radians(60))
 
     for i in range(0, len(all_contours), 1):
         current_point = all_contours[i]
@@ -120,15 +124,15 @@ def optimize_contours_by_angle(contours, image):
 
         vec1 = prev_point - current_point
         vec2 = next_point - current_point
-
-        with np.errstate(invalid='ignore'):
-            angle = np.arccos(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
-
+        bisector = (vec1 + vec2) / 2.0
         vec_to_centroid = centroid - current_point
-        cos_threshold = np.cos(np.radians(60))
 
-        if np.dot(vec_to_centroid, (vec1+vec2)/2) >= cos_threshold:
-            filtered_points.append(current_point)
+        norm_b = np.linalg.norm(bisector)
+        norm_c = np.linalg.norm(vec_to_centroid)
+        if norm_b > 0 and norm_c > 0:
+            cos_angle = np.dot(vec_to_centroid, bisector) / (norm_c * norm_b)
+            if cos_angle >= cos_threshold:
+                filtered_points.append(current_point)
 
     return np.array(filtered_points, dtype=np.int32).reshape((-1, 1, 2))
 
@@ -146,16 +150,7 @@ def filter_contours_by_area_and_return_largest(contours, pixel_thresh, ratio_thr
                     largest_contour = contour
     return [largest_contour] if largest_contour is not None else []
 
-def fit_and_draw_ellipses(image, optimized_contours, color):
-    if len(optimized_contours) >= 5:
-        contour = np.array(optimized_contours, dtype=np.int32).reshape((-1, 1, 2))
-        ellipse = cv2.fitEllipse(contour)
-        cv2.ellipse(image, ellipse, color, 2)
-        return image
-    else:
-        return image
-
-def check_contour_pixels(contour, image_shape, debug_mode_on):
+def check_contour_pixels(contour, image_shape):
     if len(contour) < 5:
         return [0, 0, None]
 
@@ -180,7 +175,7 @@ def check_contour_pixels(contour, image_shape, debug_mode_on):
 
     return [absolute_pixel_total_thick, ratio_under_ellipse, overlap_thin]
 
-def check_ellipse_goodness(binary_image, contour, debug_mode_on):
+def check_ellipse_goodness(binary_image, contour):
     ellipse_goodness = [0,0,0]
     if len(contour) < 5:
         return ellipse_goodness
@@ -196,7 +191,6 @@ def check_ellipse_goodness(binary_image, contour, debug_mode_on):
         return ellipse_goodness
 
     ellipse_goodness[0] = covered_pixels / ellipse_area
-    axes_lengths = ellipse[1]
     ellipse_goodness[2] = min(ellipse[1][1]/ellipse[1][0], ellipse[1][0]/ellipse[1][1])
 
     return ellipse_goodness
@@ -230,10 +224,10 @@ def _detect_pupil_adaptive(gray_frame, darkest_point):
 
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Area bounds scale with frame resolution
-    frame_area = h * w
-    min_area = frame_area * 0.002
-    max_area = frame_area * 0.05
+    # Area bounds scale with ROI dimensions
+    roi_area = roi.shape[0] * roi.shape[1]
+    min_area = roi_area * 0.02
+    max_area = roi_area * 0.8
 
     best_contour = None
     best_area = 0
@@ -265,12 +259,13 @@ def detect_pupil(frame, gray_frame):
     darkest_point = get_darkest_area(frame)
     darkest_pixel_value = gray_frame[darkest_point[1], darkest_point[0]]
 
+    mask_size = int(gray_frame.shape[1] * 0.4)
     thresholded_strict = apply_binary_threshold(gray_frame, darkest_pixel_value, 5)
-    thresholded_strict = mask_outside_square(thresholded_strict, darkest_point, 250)
+    thresholded_strict = mask_outside_square(thresholded_strict, darkest_point, mask_size)
     thresholded_medium = apply_binary_threshold(gray_frame, darkest_pixel_value, 15)
-    thresholded_medium = mask_outside_square(thresholded_medium, darkest_point, 250)
+    thresholded_medium = mask_outside_square(thresholded_medium, darkest_point, mask_size)
     thresholded_relaxed = apply_binary_threshold(gray_frame, darkest_pixel_value, 25)
-    thresholded_relaxed = mask_outside_square(thresholded_relaxed, darkest_point, 250)
+    thresholded_relaxed = mask_outside_square(thresholded_relaxed, darkest_point, mask_size)
 
     image_array = [thresholded_relaxed, thresholded_medium, thresholded_strict]
 
@@ -288,8 +283,8 @@ def detect_pupil(frame, gray_frame):
         reduced = filter_contours_by_area_and_return_largest(contours, 1000, 3)
 
         if len(reduced) > 0 and len(reduced[0]) > 5:
-            current_goodness = check_ellipse_goodness(dilated, reduced[0], False)
-            total_pixels = check_contour_pixels(reduced[0], dilated.shape, False)
+            current_goodness = check_ellipse_goodness(dilated, reduced[0])
+            total_pixels = check_contour_pixels(reduced[0], dilated.shape)
             final_goodness = current_goodness[0] * total_pixels[0] * total_pixels[0] * total_pixels[1]
 
             if final_goodness > 0 and final_goodness > best_goodness:
@@ -299,7 +294,7 @@ def detect_pupil(frame, gray_frame):
     if not best_contours:
         return _detect_pupil_adaptive(gray_frame, darkest_point)
 
-    optimized = optimize_contours_by_angle(best_contours, gray_frame)
+    optimized = optimize_contours_by_angle(best_contours)
     if optimized is None or len(optimized) < 5:
         return None, None
 
@@ -380,9 +375,6 @@ def smooth_pccr_vector(raw_vector):
         return None
 
     pccr_buffer.append(raw)
-    if len(pccr_buffer) > PCCR_BUFFER_SIZE:
-        pccr_buffer.pop(0)
-
     return raw
 
 def process_frame(frame):
@@ -392,8 +384,9 @@ def process_frame(frame):
     frame = crop_to_aspect_ratio(frame)
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    if HIGH_FPS_MODE:
-        gray_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
+    # TODO: re-evaluate blur for HIGH_FPS_MODE once 30fps pipeline is stable
+    # if HIGH_FPS_MODE:
+    #     gray_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
 
     pupil_center, pupil_ellipse = detect_pupil(frame, gray_frame)
 
@@ -459,14 +452,18 @@ def update_gaze_circle_from_current_gaze():
     v = feat @ poly_coeffs_y
 
     screen_buffer.append((u, v))
-    if len(screen_buffer) > BUFFER_SIZE:
-        screen_buffer.pop(0)
 
     avg_u = np.mean([p[0] for p in screen_buffer])
     avg_v = np.mean([p[1] for p in screen_buffer])
 
     circle_x = int(np.clip(avg_u, 0, EXT_WIDTH - 1))
     circle_y = int(np.clip(avg_v, 0, EXT_HEIGHT - 1))
+
+    # Broadcast gaze coordinates locally on port 5005
+    # TODO: Use this for YOLO object recognition on front camera feed (separate script)
+    # so that I know when a person is looking at an object
+    udp_sock.sendto(json.dumps({"x": circle_x, "y": circle_y}).encode(), ("127.0.0.1", 5005))
+
 
 def _build_poly_features(gx, gy):
     """Build 2nd-degree polynomial feature row: [1, gx, gy, gx^2, gy^2, gx*gy]"""
