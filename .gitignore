@@ -4,3 +4,6 @@ gaze_vector.txt
 # Cache stuff
 .vscode
 Scripts/__pycache__
+
+# venv
+/et
