@@ -94,7 +94,7 @@ def crop_to_aspect_ratio(image, width=640, height=480):
     return cv2.resize(cropped_img, (width, height))
 
 def apply_binary_threshold(image, darkestPixelValue, addedThreshold):
-    threshold = darkestPixelValue + addedThreshold
+    threshold = int(darkestPixelValue) + addedThreshold
     _, thresholded_image = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY_INV)
     return thresholded_image
 
@@ -861,7 +861,7 @@ def process_camera():
         if not ret_eye:
             break
 
-        eye_frame = cv2.flip(eye_frame, 0)
+        # eye_frame = cv2.flip(eye_frame, 0)
         cv2.imshow("Original Eye Frame", eye_frame)
         process_frame(eye_frame)
 
