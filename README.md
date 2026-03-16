@@ -2,7 +2,7 @@
 
 A high-precision, low-latency eye tracker prototype. Use cases include medical, marketing, sports performance coaching, gaming, day-to-day life, etc.
 
-# (Super) Team: 
+# Team: 
 Cody Lam, Daniel Kaijzer, Ethan Shim, Harwin He, Roselio Ortega
 
 # Deliverables and milestones 
