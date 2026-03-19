@@ -4,7 +4,7 @@ import numpy as np
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog
-import sys
+# import sys
 import time
 import socket
 import json
@@ -61,6 +61,7 @@ EXT_CY = EXT_HEIGHT // 2
 circle_x = EXT_CX
 circle_y = EXT_CY
 
+
 # Function to detect available cameras
 def detect_cameras(max_cams=10):
     available_cameras = []
@@ -70,6 +71,7 @@ def detect_cameras(max_cams=10):
             available_cameras.append(i)
             cap.release()
     return available_cameras
+
 
 def crop_to_aspect_ratio(image, width=640, height=480):
     current_height, current_width = image.shape[:2]
@@ -87,10 +89,12 @@ def crop_to_aspect_ratio(image, width=640, height=480):
 
     return cv2.resize(cropped_img, (width, height))
 
+
 def apply_binary_threshold(image, darkestPixelValue, addedThreshold):
     threshold = darkestPixelValue + addedThreshold
     _, thresholded_image = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY_INV)
     return thresholded_image
+
 
 def get_darkest_area(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -99,6 +103,7 @@ def get_darkest_area(image):
     roi = blurred[margin:-margin, margin:-margin]
     min_loc = cv2.minMaxLoc(roi)[3]
     return (min_loc[0] + margin, min_loc[1] + margin)
+
 
 def mask_outside_square(image, center, size):
     x, y = center
@@ -110,6 +115,7 @@ def mask_outside_square(image, center, size):
     bottom_right_y = min(image.shape[0], y + half_size)
     mask[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = 255
     return cv2.bitwise_and(image, mask)
+
 
 def optimize_contours_by_angle(contours):
     if len(contours) < 1:
@@ -140,6 +146,7 @@ def optimize_contours_by_angle(contours):
 
     return np.array(filtered_points, dtype=np.int32).reshape((-1, 1, 2))
 
+
 def filter_contours_by_area_and_return_largest(contours, pixel_thresh, ratio_thresh):
     max_area = 0
     largest_contour = None
@@ -153,6 +160,7 @@ def filter_contours_by_area_and_return_largest(contours, pixel_thresh, ratio_thr
                     max_area = area
                     largest_contour = contour
     return [largest_contour] if largest_contour is not None else []
+
 
 def check_contour_pixels(contour, image_shape):
     if len(contour) < 5:
@@ -179,8 +187,9 @@ def check_contour_pixels(contour, image_shape):
 
     return [absolute_pixel_total_thick, ratio_under_ellipse, overlap_thin]
 
+
 def check_ellipse_goodness(binary_image, contour):
-    ellipse_goodness = [0,0,0]
+    ellipse_goodness = [0, 0, 0]
     if len(contour) < 5:
         return ellipse_goodness
 
@@ -198,6 +207,7 @@ def check_ellipse_goodness(binary_image, contour):
     ellipse_goodness[2] = min(ellipse[1][1]/ellipse[1][0], ellipse[1][0]/ellipse[1][1])
 
     return ellipse_goodness
+
 
 def _detect_pupil_adaptive(gray_frame, darkest_point):
     """Fallback pupil detection using adaptive thresholding for IR washout."""
@@ -306,6 +316,7 @@ def detect_pupil(frame, gray_frame):
     center = (int(ellipse[0][0]), int(ellipse[0][1]))
     return center, ellipse
 
+
 def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
     """Detect IR glints (corneal reflections) near the pupil.
 
@@ -367,12 +378,12 @@ def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
 
     return glint_centroid, glint_points
 
+
 def smooth_pccr_vector(raw_vector):
     """Reject outlier PCCR vectors that jump too far from the running median.
 
     Returns the vector if accepted, or None if rejected.
     """
-    global pccr_buffer
 
     raw = np.array(raw_vector, dtype=float)
 
@@ -388,6 +399,7 @@ def smooth_pccr_vector(raw_vector):
 
     pccr_buffer.append(raw)
     return raw
+
 
 def process_frame(frame):
     """PCCR pipeline: detect pupil, detect glints, compute pupil-glint vector."""
@@ -450,8 +462,9 @@ def process_frame(frame):
 
     cv2.imshow("Eye Camera", frame)
 
+
 def update_gaze_circle_from_current_gaze():
-    global circle_x, circle_y, last_pccr_vector, calibrated, screen_buffer
+    global circle_x, circle_y
     if not calibrated or last_pccr_vector is None:
         return
     if poly_coeffs_x is None or poly_coeffs_y is None:
@@ -480,6 +493,7 @@ def update_gaze_circle_from_current_gaze():
 def _build_poly_features(gx, gy):
     """Build 2nd-degree polynomial feature row: [1, gx, gy, gx^2, gy^2, gx*gy]"""
     return np.array([1.0, gx, gy, gx*gx, gy*gy, gx*gy])
+
 
 def compute_polynomial_calibration():
     """Fit 2nd-degree polynomial from PCCR vectors to screen coords (least-squares)."""
@@ -525,15 +539,18 @@ def compute_polynomial_calibration():
     _save_calibration()
     return True
 
+
 def _calibration_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_data.npz")
+
 
 def _history_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_history.npz")
 
+
 def _save_calibration():
     """Save polynomial coefficients and raw calibration data."""
-    global poly_coeffs_x, poly_coeffs_y
+
     path = _calibration_path()
     vectors = np.array(calib_vectors_eye)
     points = np.array(calib_points_screen)
@@ -562,6 +579,7 @@ def _save_calibration():
     total_pts = sum(len(v) for v in old_vectors)
     print(f"  History: {len(old_vectors)} sessions, {total_pts} total points.")
 
+
 def load_calibration():
     """Load saved polynomial calibration. Returns True on success."""
     global poly_coeffs_x, poly_coeffs_y, calibrated
@@ -580,9 +598,10 @@ def load_calibration():
         print("  WARNING: Calibration is >24h old. Consider recalibrating.")
     return True
 
+
 def start_calibration():
     global calib_state, calib_points_screen, calib_vectors_eye, calib_collecting, calib_collect_frames
-    global calib_total_points, pccr_buffer
+    global calib_total_points
     calib_state = 1
     pccr_buffer.clear()
     calib_vectors_eye = []
@@ -602,11 +621,13 @@ def start_calibration():
     calib_total_points = len(calib_points_screen)
     print(f"Calibration started ({calib_total_points} points). Look at the RED dot and press 'c'.")
 
+
 def begin_capture():
     """Start multi-sample collection for the current calibration point."""
     global calib_collecting, calib_collect_frames
     calib_collecting = True
     calib_collect_frames = []
+
 
 def tick_capture():
     """Called each frame during collection. Returns True when done collecting."""
@@ -646,9 +667,98 @@ def tick_capture():
         print(f"  Captured {len(calib_vectors_eye)}/{calib_total_points}. Look at next dot, press 'c'.")
     return True
 
+
+def _setup_eye_camera(cam_index):
+    cap = cv2.VideoCapture(cam_index)
+    if not cap.isOpened():
+        print(f"Error: Could not open eye camera at index {cam_index}.")
+        return None
+    if HIGH_FPS_MODE:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        cap.set(cv2.CAP_PROP_FPS, 120)
+    cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+    return cap
+
+
+def _setup_windows(external_cap):
+    cv2.namedWindow("Eye Camera")
+    cv2.moveWindow("Eye Camera", 50, 600)
+    if external_cap is not None:
+        cv2.namedWindow("External Camera (Gaze)")
+        cv2.moveWindow("External Camera (Gaze)", 720, 50)
+
+
+def _setup_external_camera(cam_index):
+    external_index = 1 if cam_index == 0 else 0
+    cap = cv2.VideoCapture(external_index)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, EXT_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, EXT_HEIGHT)
+        return cap
+    return None
+
+
+def _draw_calibration_targets(ext_frame_resized):
+    target = calib_points_screen[calib_state - 1]
+    cv2.circle(ext_frame_resized, target, 15, (0, 0, 255), -1)
+    for i, pt in enumerate(calib_points_screen):
+        if i < len(calib_vectors_eye):
+            cv2.circle(ext_frame_resized, pt, 5, (0, 200, 0), -1)
+        elif i != calib_state - 1:
+            cv2.circle(ext_frame_resized, pt, 5, (100, 100, 100), -1)
+    status_text = f"Point {calib_state}/{calib_total_points}"
+    if calib_collecting:
+        progress = len(calib_collect_frames)
+        status_text += f" - collecting [{progress}/{CALIB_SAMPLES}]"
+        cv2.circle(ext_frame_resized, target, 20, (0, 165, 255), 3)
+    else:
+        status_text += " - press 'c'"
+    cv2.putText(ext_frame_resized, status_text,
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+
+def _render_external_frame(ext_frame):
+    ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
+    if calib_state > 0:
+        _draw_calibration_targets(ext_frame_resized)
+    elif calibrated:
+        update_gaze_circle_from_current_gaze()
+        cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
+    cv2.imshow("External Camera (Gaze)", ext_frame_resized)
+
+
+def _handle_keypress(key):
+    """Returns False if the user wants to quit, True otherwise."""
+    if key == ord('q'):
+        return False
+    if key == ord(' '):
+        cv2.waitKey(0)
+    elif key == ord('l'):
+        load_calibration()
+    elif key == ord('c'):
+        if calib_state == 0:
+            start_calibration()
+        elif not calib_collecting:
+            begin_capture()
+    return True
+
+
+def _process_eye_frame(eye_cap):
+    ret_eye, eye_frame = eye_cap.read()
+    if not ret_eye:
+        return False
+    eye_frame = cv2.flip(eye_frame, 0)
+    cv2.imshow("Original Eye Frame", eye_frame)
+    process_frame(eye_frame)
+    if calib_collecting:
+        tick_capture()
+    return True
+
+
 # Process video from the selected eye camera + external camera preview
 def process_camera():
-    global selected_camera, circle_x, circle_y, calibrated
+    global circle_x, circle_y, calibrated
 
     try:
         cam_index = int(selected_camera.get())
@@ -656,100 +766,138 @@ def process_camera():
         print("No valid camera selected.")
         return
 
-    eye_cap = cv2.VideoCapture(cam_index)
-    if not eye_cap.isOpened():
-        print(f"Error: Could not open eye camera at index {cam_index}.")
+    eye_cap = _setup_eye_camera(cam_index)
+    if eye_cap is None:
         return
 
-    if HIGH_FPS_MODE:
-        eye_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        eye_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-        eye_cap.set(cv2.CAP_PROP_FPS, 120)
-
-    eye_cap.set(cv2.CAP_PROP_EXPOSURE, -5)
-
-    external_index = 1 if cam_index == 0 else 0
-    external_cap = cv2.VideoCapture(external_index)
-
-    if external_cap.isOpened():
-        external_cap.set(cv2.CAP_PROP_FRAME_WIDTH, EXT_WIDTH)
-        external_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, EXT_HEIGHT)
-    else:
-        external_cap = None
+    external_cap = _setup_external_camera(cam_index)
+    _setup_windows(external_cap)
 
     circle_x, circle_y = EXT_CX, EXT_CY
     calibrated = False
 
-    cv2.namedWindow("Eye Camera")
-    cv2.moveWindow("Eye Camera", 50, 600)
-
-    if external_cap is not None:
-        cv2.namedWindow("External Camera (Gaze)")
-        cv2.moveWindow("External Camera (Gaze)", 720, 50)
-
     print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
 
     while True:
-        ret_eye, eye_frame = eye_cap.read()
-        if not ret_eye:
+        if not _process_eye_frame(eye_cap):
             break
-
-        eye_frame = cv2.flip(eye_frame, 0)
-        cv2.imshow("Original Eye Frame", eye_frame)
-        process_frame(eye_frame)
-
-        # Tick multi-sample collection if active
-        if calib_collecting:
-            tick_capture()
 
         if external_cap is not None:
             ret_ext, ext_frame = external_cap.read()
             if ret_ext:
-                ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
+                _render_external_frame(ext_frame)
 
-                if calib_state > 0:
-                    target = calib_points_screen[calib_state - 1]
-                    cv2.circle(ext_frame_resized, target, 15, (0, 0, 255), -1)
-                    # Draw small dots for all targets
-                    for i, pt in enumerate(calib_points_screen):
-                        if i < len(calib_vectors_eye):
-                            cv2.circle(ext_frame_resized, pt, 5, (0, 200, 0), -1)
-                        elif i != calib_state - 1:
-                            cv2.circle(ext_frame_resized, pt, 5, (100, 100, 100), -1)
-
-                    status_text = f"Point {calib_state}/{calib_total_points}"
-                    if calib_collecting:
-                        progress = len(calib_collect_frames)
-                        status_text += f" - collecting [{progress}/{CALIB_SAMPLES}]"
-                        cv2.circle(ext_frame_resized, target, 20, (0, 165, 255), 3)
-                    else:
-                        status_text += " - press 'c'"
-                    cv2.putText(ext_frame_resized, status_text,
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                elif calibrated:
-                    update_gaze_circle_from_current_gaze()
-                    cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
-
-                cv2.imshow("External Camera (Gaze)", ext_frame_resized)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if not _handle_keypress(cv2.waitKey(1) & 0xFF):
             break
-        elif key == ord(' '):
-            cv2.waitKey(0)
-        elif key == ord('l'):
-            load_calibration()
-        elif key == ord('c'):
-            if calib_state == 0:
-                start_calibration()
-            elif not calib_collecting:
-                begin_capture()
 
     eye_cap.release()
     if external_cap is not None:
         external_cap.release()
     udp_sock.close()
     cv2.destroyAllWindows()
+    # global circle_x, circle_y, calibrated
+    #
+    # try:
+    #     cam_index = int(selected_camera.get())
+    # except ValueError:
+    #     print("No valid camera selected.")
+    #     return
+    #
+    # eye_cap = cv2.VideoCapture(cam_index)
+    # if not eye_cap.isOpened():
+    #     print(f"Error: Could not open eye camera at index {cam_index}.")
+    #     return
+    #
+    # if HIGH_FPS_MODE:
+    #     eye_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    #     eye_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    #     eye_cap.set(cv2.CAP_PROP_FPS, 120)
+    #
+    # eye_cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+    #
+    # external_index = 1 if cam_index == 0 else 0
+    # external_cap = cv2.VideoCapture(external_index)
+    #
+    # if external_cap.isOpened():
+    #     external_cap.set(cv2.CAP_PROP_FRAME_WIDTH, EXT_WIDTH)
+    #     external_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, EXT_HEIGHT)
+    # else:
+    #     external_cap = None
+    #
+    # circle_x, circle_y = EXT_CX, EXT_CY
+    # calibrated = False
+    #
+    # cv2.namedWindow("Eye Camera")
+    # cv2.moveWindow("Eye Camera", 50, 600)
+    #
+    # if external_cap is not None:
+    #     cv2.namedWindow("External Camera (Gaze)")
+    #     cv2.moveWindow("External Camera (Gaze)", 720, 50)
+    #
+    # print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
+    #
+    # while True:
+    #     ret_eye, eye_frame = eye_cap.read()
+    #     if not ret_eye:
+    #         break
+    #
+    #     eye_frame = cv2.flip(eye_frame, 0)
+    #     cv2.imshow("Original Eye Frame", eye_frame)
+    #     process_frame(eye_frame)
+    #
+    #     # Tick multi-sample collection if active
+    #     if calib_collecting:
+    #         tick_capture()
+    #
+    #     if external_cap is not None:
+    #         ret_ext, ext_frame = external_cap.read()
+    #         if ret_ext:
+    #             ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
+    #
+    #             if calib_state > 0:
+    #                 target = calib_points_screen[calib_state - 1]
+    #                 cv2.circle(ext_frame_resized, target, 15, (0, 0, 255), -1)
+    #                 # Draw small dots for all targets
+    #                 for i, pt in enumerate(calib_points_screen):
+    #                     if i < len(calib_vectors_eye):
+    #                         cv2.circle(ext_frame_resized, pt, 5, (0, 200, 0), -1)
+    #                     elif i != calib_state - 1:
+    #                         cv2.circle(ext_frame_resized, pt, 5, (100, 100, 100), -1)
+    #
+    #                 status_text = f"Point {calib_state}/{calib_total_points}"
+    #                 if calib_collecting:
+    #                     progress = len(calib_collect_frames)
+    #                     status_text += f" - collecting [{progress}/{CALIB_SAMPLES}]"
+    #                     cv2.circle(ext_frame_resized, target, 20, (0, 165, 255), 3)
+    #                 else:
+    #                     status_text += " - press 'c'"
+    #                 cv2.putText(ext_frame_resized, status_text,
+    #                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    #             elif calibrated:
+    #                 update_gaze_circle_from_current_gaze()
+    #                 cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
+    #
+    #             cv2.imshow("External Camera (Gaze)", ext_frame_resized)
+    #
+    #     key = cv2.waitKey(1) & 0xFF
+    #     if key == ord('q'):
+    #         break
+    #     elif key == ord(' '):
+    #         cv2.waitKey(0)
+    #     elif key == ord('l'):
+    #         load_calibration()
+    #     elif key == ord('c'):
+    #         if calib_state == 0:
+    #             start_calibration()
+    #         elif not calib_collecting:
+    #             begin_capture()
+    #
+    # eye_cap.release()
+    # if external_cap is not None:
+    #     external_cap.release()
+    # udp_sock.close()
+    # cv2.destroyAllWindows()
+
 
 def process_video():
     video_path = filedialog.askopenfilename(filetypes=[("Video Files", "*.mp4;*.avi")])
@@ -771,6 +919,7 @@ def process_video():
     cap.release()
     udp_sock.close()
     cv2.destroyAllWindows()
+
 
 def selection_gui():
     global selected_camera
@@ -797,6 +946,7 @@ def selection_gui():
     tk.Button(root, text="Browse Video", command=lambda: [root.destroy(), process_video()]).pack(pady=5)
 
     root.mainloop()
+
 
 if __name__ == "__main__":
     selection_gui()
