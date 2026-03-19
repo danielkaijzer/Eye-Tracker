@@ -215,7 +215,7 @@ def check_ellipse_goodness(binary_image, contour, debug_mode_on):
     return ellipse_goodness
 
 def process_frames(thresholded_image_strict, thresholded_image_medium, thresholded_image_relaxed, frame, gray_frame, darkest_point, debug_mode_on, render_cv_window):
-    global ray_lines, max_rays, prev_model_center_avg, max_observed_distance
+    global ray_lines, prev_model_center_avg, max_observed_distance
 
     final_rotated_rect = None
     image_array = [thresholded_image_relaxed, thresholded_image_medium, thresholded_image_strict] 
