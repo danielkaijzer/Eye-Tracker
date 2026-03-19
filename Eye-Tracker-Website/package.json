@@ -1,0 +1,22 @@
+{
+  "name": "eye-tracker-website",
+  "version": "1.0.0",
+  "description": "A website for the Eye Tracker project, featuring various pages for data visualization and analytics.",
+  "main": "src/scripts/script.js",
+  "scripts": {
+    "start": "live-server src",
+    "build": "echo 'Build process will be defined later.'"
+  },
+  "keywords": [
+    "eye-tracking",
+    "analytics",
+    "heatmap",
+    "calibration"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "live-server": "^1.2.1"
+  }
+}
