@@ -31,6 +31,10 @@ export default function DashboardPage() {
     );
   }
 
+  /** `python scripts/linux_cam_stream.py` → MJPEG at this URL */
+  const cameraStreamUrl =
+    process.env.NEXT_PUBLIC_CAMERA_STREAM_URL ?? "http://127.0.0.1:5000/";
+
   return (
     <div className="flex min-h-screen flex-col bg-[#121212] font-sans text-white">
       <header className="mx-4 mt-4 grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-2xl border border-white bg-black px-6 py-4">
@@ -62,7 +66,15 @@ export default function DashboardPage() {
             the screen here.
           </p>
           <div className="relative min-h-[240px] flex-1 overflow-hidden rounded-xl bg-black">
-            <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-red-500 bg-transparent" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
+            <img
+              src={cameraStreamUrl}
+              alt="Live camera"
+              className="h-full min-h-[240px] w-full object-contain"
+            />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="h-8 w-8 rounded-full border-2 border-red-500 bg-transparent" />
+            </div>
           </div>
         </section>
 
