@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -42,9 +43,24 @@ export default function DashboardPage() {
           Logo
         </div>
         <nav className="flex justify-center gap-8 text-sm font-medium text-white max-sm:gap-4 max-sm:text-xs">
-          <span>HeatMap</span>
-          <span>Calibration</span>
-          <span>ML Analytics</span>
+          <Link
+            href="/dashboard/heatmap"
+            className="hover:text-blue-400 transition-colors"
+          >
+            HeatMap
+          </Link>
+          <Link
+            href="/dashboard/calibration"
+            className="hover:text-blue-400 transition-colors"
+          >
+            Calibration
+          </Link>
+          <Link
+            href="/dashboard/ml-analytics"
+            className="hover:text-blue-400 transition-colors"
+          >
+            ML Analytics
+          </Link>
         </nav>
         <div className="flex justify-end">
           <div
