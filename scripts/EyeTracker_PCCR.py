@@ -11,6 +11,9 @@ import json
 from collections import deque
 udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+from heatmap import Heatmap #added by ross
+heatmap: Heatmap = None #added by ross
+
 BUFFER_SIZE = 5  # Small enough to be responsive, large enough to stop jitter
 screen_buffer = deque(maxlen=BUFFER_SIZE)
 
@@ -724,6 +727,9 @@ def _render_external_frame(ext_frame):
         _draw_calibration_targets(ext_frame_resized)
     elif calibrated:
         update_gaze_circle_from_current_gaze()
+        if calibrated and not calib_state: #added by ross
+            heatmap.add_point(circle_x, circle_y) #added by ross
+            heatmap.render() #added by ross
         cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
     cv2.imshow("External Camera (Gaze)", ext_frame_resized)
 
@@ -736,6 +742,12 @@ def _handle_keypress(key):
         cv2.waitKey(0)
     elif key == ord('l'):
         load_calibration()
+    elif key == ord('h'): #added by ross
+        heatmap.toggle() #added by ross
+    elif key == ord('r'): #added by ross
+        heatmap.reset() #added by ross
+    elif key == ord('s'): #added by ross
+        heatmap.save() #added by ross
     elif key == ord('c'):
         if calib_state == 0:
             start_calibration()
@@ -758,6 +770,8 @@ def _process_eye_frame(eye_cap):
 
 # Process video from the selected eye camera + external camera preview
 def process_camera():
+    global heatmap #added by ross
+    heatmap = Heatmap(width=EXT_WIDTH, height=EXT_HEIGHT) #added by ross
     global circle_x, circle_y, calibrated
 
     try:

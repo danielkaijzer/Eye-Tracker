@@ -33,7 +33,7 @@ class Heatmap:
         """records a single gaze point, called after calibration every frame"""
         x = int(np.clip(x, 0, self.w - 1))
         y = int(np.clip(y, 0, self.h - 1))
-        self._accum[y, x] = weight
+        self._accum[y, x] += weight
         self._point_count += 1
 
 
@@ -78,6 +78,13 @@ class Heatmap:
         """destroys the heatmap window"""
         cv2.destroyWindow(self.WINDOW_NAME)
 
+
+    def reset(self):
+        """clears all accumulated data"""
+        self._accum[:] = 0
+        self._point_count = 0
+        self._session_start = time.time()
+        print("[heatmap] reset.")
     #---------------------------------------------------------------------------------
     #HELPERS
 
@@ -90,7 +97,7 @@ class Heatmap:
         blurred = cv2.GaussianBlur(self._accum, (self.BLUR_KERNEL, self.BLUR_KERNEL), 0)
 
         #normalizes to 0-255
-        norm = cv2.normalize(blurred, 0, 255, cv2.NORM_MINMAX)
+        norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
         heat_gray = norm.astype(np.uint8)
 
         #apply JET colormap, so blue=low and red=high
@@ -100,4 +107,17 @@ class Heatmap:
         mask = (heat_gray > 5).astype(np.float32)
         mask_3ch = np.stack([mask, mask, mask], axis=2)
 
-        #
+        #blends the background with the heatmap over the active regions
+        bg = self._background.copy().astype(np.float32)
+        hm = heat_color.astype(np.float32)
+        alpha = mask_3ch * self.OVERLAY_ALPHA
+        blended = bg * (1.0 - alpha) + hm * alpha
+        return blended.astype(np.uint8)
+
+
+    def _draw_stats(self, frame: np.ndarray):
+        """burns the basic session stats into the frame"""
+        elapsed = int(time.time() - self._session_start)
+        mins, secs = divmod(elapsed, 60)
+        text = f"points: {self._point_count}  |  Time: {mins:02d}:{secs:02d}"
+        cv2.putText(frame, text, (10, self.h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
