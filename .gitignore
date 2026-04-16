@@ -1,5 +1,7 @@
 # Session files
 gaze_vector.txt
+data/
+GEMINI.md
 
 # Cache stuff
 .vscode
@@ -7,7 +9,7 @@ Scripts/__pycache__
 
 # venv
 .venv/
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+.et/
 
 # dependencies (no leading / — ignore in subfolders e.g. frontend/node_modules)
 node_modules/
