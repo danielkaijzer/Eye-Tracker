@@ -37,16 +37,46 @@ HIGH_FPS_MODE = False
 last_pupil_center = None  # np.array([x, y], dtype=float) or None if invalid
 last_confidence = 0.0
 
-# Circularity of the fitted pupil ellipse, used as confidence proxy.
-# The inner refiner already rejects circularity < 0.4; this is a stricter
-# outer gate for calibration capture and runtime mapping.
-CONF_THRESH = 0.6
+# Confidence = supporting-edge-length / Ramanujan-2 ellipse circumference.
+# Pupil Labs report values up to ~0.97 on clean data; 0.3–0.6 is typical with
+# partial occlusion. Tune lower if too many frames are rejected.
+CONF_THRESH = 0.35
 
 # Outlier rejection on pupil center — guards against the detector flipping
 # to a non-pupil blob (eyelash, eyebrow). Tune after a first calibration run.
 PUPIL_BUFFER_SIZE = 7
 pupil_buffer = deque(maxlen=PUPIL_BUFFER_SIZE)
 PUPIL_JUMP_THRESH = 200.0
+
+# --- Świrski / Pupil-Labs detection pipeline params ---
+# Center-surround Haar search: scan image at these half-widths (px).
+SWIRSKI_R_MIN = 20
+SWIRSKI_R_MAX = 60
+SWIRSKI_R_STEP = 4
+SWIRSKI_XY_STEP = 4
+
+CANNY_LOW = 40
+CANNY_HIGH = 100
+
+# "Dark" pixels: darker than (1st-percentile pixel + DARK_OFFSET). Proxy for
+# Pupil Labs' "lowest spike in histogram + user offset".
+DARK_OFFSET = 25
+
+# Spectral reflection (glint) cutoff; edges near these pixels are dropped.
+BRIGHT_THRESH = 200
+
+# Curvature-continuity split: if consecutive tangent vectors' dot product
+# drops below this, split the contour there.
+CURVATURE_SPLIT_DOT = 0.3
+
+PUPIL_MIN_MINOR_AXIS = 10
+PUPIL_MAX_MAJOR_AXIS_FRAC = 0.5   # of smaller ROI side
+PUPIL_MAX_ASPECT = 2.5
+
+# Inlier distance (px) from contour point to candidate ellipse.
+ELLIPSE_INLIER_THRESH_PX = 2.5
+# Minimum fraction of a sub-contour's points that must be inliers.
+ELLIPSE_SUPPORT_FRAC = 0.55
 
 calibrated = False
 
@@ -86,112 +116,261 @@ def crop_to_aspect_ratio(image, width=640, height=480):
     return cv2.resize(cropped_img, (width, height))
 
 
-def _find_pupil_blob(gray_frame):
-    """Stage 1: Find pupil candidate using blob detection for dark, circular blobs."""
-    params = cv2.SimpleBlobDetector_Params()
-
-    params.filterByColor = True
-    params.blobColor = 0
-
-    params.filterByArea = True
-    params.minArea = 300
-    params.maxArea = 15000
-
-    params.filterByCircularity = True
-    params.minCircularity = 0.5
-
-    params.filterByConvexity = True
-    params.minConvexity = 0.7
-
-    params.filterByInertia = True
-    params.minInertiaRatio = 0.4
-
-    detector = cv2.SimpleBlobDetector_create(params)
-    keypoints = detector.detect(gray_frame)
-
-    if not keypoints:
-        return None, None
-
-    h, w = gray_frame.shape[:2]
-    cx, cy = w / 2, h / 2
-    best = min(keypoints, key=lambda kp: (kp.pt[0] - cx)**2 + (kp.pt[1] - cy)**2)
-    center = (int(best.pt[0]), int(best.pt[1]))
-    radius = best.size / 2
-    return center, radius
+def _integral_rect_sum(integral, x1, y1, x2, y2):
+    """Sum of pixels in rect [y1:y2, x1:x2) using an integral image."""
+    return (integral[y2, x2] - integral[y1, x2]
+            - integral[y2, x1] + integral[y1, x1])
 
 
-def _refine_pupil_ellipse(gray_frame, blob_center, blob_radius):
-    """Stage 2: Refine blob into a precise ellipse using adaptive threshold.
+def _find_pupil_region(gray):
+    """Świrski-style Haar center-surround to find initial pupil region.
 
-    Returns (center, ellipse, confidence). Confidence is the circularity of
-    the chosen contour — a cheap proxy for Pupil Labs' edge-support ratio.
+    Returns (center, half-width) of the strongest dark-center / bright-surround
+    response, or (None, 0).
     """
-    h, w = gray_frame.shape[:2]
-    margin = int(blob_radius * 2.5)
-    bx, by = blob_center
+    h, w = gray.shape
+    if min(h, w) < 2 * SWIRSKI_R_MIN + 4:
+        return None, 0
 
-    x1 = max(0, bx - margin)
-    y1 = max(0, by - margin)
-    x2 = min(w, bx + margin)
-    y2 = min(h, by + margin)
-    roi = gray_frame[y1:y2, x1:x2]
+    integral = cv2.integral(gray).astype(np.int64)
 
-    if roi.size == 0 or min(roi.shape[:2]) < 15:
-        return None, None, 0.0
+    best_response = -np.inf
+    best_center = None
+    best_r = 0
 
-    block = 15 if min(roi.shape[:2]) > 30 else 7
-    binary = cv2.adaptiveThreshold(
-        roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
-        blockSize=block, C=5
-    )
+    for r in range(SWIRSKI_R_MIN, SWIRSKI_R_MAX + 1, SWIRSKI_R_STEP):
+        if 2 * r >= min(h, w):
+            break
+        xs = np.arange(2 * r, w - 2 * r, SWIRSKI_XY_STEP)
+        ys = np.arange(2 * r, h - 2 * r, SWIRSKI_XY_STEP)
+        if len(xs) == 0 or len(ys) == 0:
+            continue
+        X, Y = np.meshgrid(xs, ys)
 
+        inner = _integral_rect_sum(integral, X - r, Y - r, X + r, Y + r)
+        outer_total = _integral_rect_sum(integral, X - 2 * r, Y - 2 * r,
+                                         X + 2 * r, Y + 2 * r)
+        outer = outer_total - inner
+
+        inner_area = (2 * r) ** 2
+        outer_area = (4 * r) ** 2 - inner_area
+        response = outer.astype(float) / outer_area - inner.astype(float) / inner_area
+
+        idx = np.unravel_index(np.argmax(response), response.shape)
+        if response[idx] > best_response:
+            best_response = float(response[idx])
+            best_center = (int(X[idx]), int(Y[idx]))
+            best_r = r
+
+    return best_center, best_r
+
+
+def _find_dark_threshold(roi):
+    """Pixel value below which a pixel counts as 'dark'.
+
+    Paper: offset from lowest spike in intensity histogram. Proxy here:
+    1st-percentile pixel + DARK_OFFSET — robust to hot pixels, no peak-finding
+    dependency.
+    """
+    darkest = int(np.percentile(roi, 1))
+    return darkest + DARK_OFFSET
+
+
+def _find_spectral_mask(roi):
+    """Dilated mask of near-saturated pixels (IR glints / spectral reflections)."""
+    _, mask = cv2.threshold(roi, BRIGHT_THRESH, 255, cv2.THRESH_BINARY)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k, iterations=2)
+    return cv2.dilate(mask, k, iterations=2)
 
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    roi_area = roi.shape[0] * roi.shape[1]
-    min_area = roi_area * 0.02
-    max_area = roi_area * 0.8
+def _filter_edges(edges, roi):
+    """Keep edges on dark-region boundaries; drop edges near glints."""
+    dark_thresh = _find_dark_threshold(roi)
+    dark_mask = ((roi < dark_thresh).astype(np.uint8)) * 255
+    # Dilate so edges on the dark/light transition still pass the gate.
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    dark_mask = cv2.dilate(dark_mask, k, iterations=1)
 
-    best_contour = None
-    best_area = 0
-    best_circularity = 0.0
+    bright_mask = _find_spectral_mask(roi)
+
+    filtered = cv2.bitwise_and(edges, dark_mask)
+    filtered = cv2.bitwise_and(filtered, cv2.bitwise_not(bright_mask))
+    return filtered
+
+
+def _split_by_curvature(contour):
+    """Split a contour at points where the tangent direction changes abruptly."""
+    pts = contour.reshape(-1, 2)
+    n = len(pts)
+    if n < 7:
+        return [contour] if n >= 5 else []
+
+    k = 3  # look-ahead for tangent estimation
+    tangents = np.zeros((n, 2), dtype=float)
+    for i in range(n):
+        forward = pts[(i + k) % n] - pts[i]
+        f_norm = np.linalg.norm(forward)
+        if f_norm > 0:
+            tangents[i] = forward / f_norm
+
+    subs = []
+    start = 0
+    for i in range(1, n):
+        dot = float(np.dot(tangents[i], tangents[i - 1]))
+        if dot < CURVATURE_SPLIT_DOT:
+            if i - start >= 5:
+                subs.append(contour[start:i])
+            start = i
+    if n - start >= 5:
+        subs.append(contour[start:])
+    return subs
+
+
+def _fit_candidate_ellipses(sub_contours, roi_shape):
+    """Fit an ellipse to each sub-contour; filter by size and aspect ratio."""
+    max_axis = int(min(roi_shape[:2]) * PUPIL_MAX_MAJOR_AXIS_FRAC)
+    candidates = []
+    for sub in sub_contours:
+        if len(sub) < 5:
+            continue
+        try:
+            ellipse = cv2.fitEllipse(sub)
+        except cv2.error:
+            continue
+        (_cx, _cy), (minor, major), _ang = ellipse
+        if minor < PUPIL_MIN_MINOR_AXIS or major > max_axis or minor <= 0:
+            continue
+        if major / minor > PUPIL_MAX_ASPECT:
+            continue
+        candidates.append((ellipse, sub))
+    return candidates
+
+
+def _point_ellipse_distance_approx(points, ellipse):
+    """Approximate Euclidean distance from points to an ellipse contour.
+
+    Uses algebraic distance scaled by average radius — accurate within a few
+    percent for points close to the curve, which is all we need for inlier
+    gating. Exact distance is a quartic root-finding problem; not worth it here.
+    """
+    (cx, cy), (minor_d, major_d), angle_deg = ellipse
+    if minor_d <= 0 or major_d <= 0:
+        return np.full(len(points), np.inf)
+    a = major_d / 2.0
+    b = minor_d / 2.0
+    angle = np.radians(angle_deg)
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+
+    dx = points[:, 0] - cx
+    dy = points[:, 1] - cy
+    x_rot = cos_a * dx + sin_a * dy
+    y_rot = -sin_a * dx + cos_a * dy
+    d_normed = np.sqrt((x_rot / a) ** 2 + (y_rot / b) ** 2)
+    return np.abs(d_normed - 1.0) * (a + b) / 2.0
+
+
+def _find_supporting_contours(ellipse, sub_contours):
+    """Sub-contours with at least ELLIPSE_SUPPORT_FRAC of points near the ellipse."""
+    supporting = []
+    for sub in sub_contours:
+        pts = sub.reshape(-1, 2).astype(float)
+        dists = _point_ellipse_distance_approx(pts, ellipse)
+        inliers = dists < ELLIPSE_INLIER_THRESH_PX
+        if len(inliers) > 0 and inliers.mean() >= ELLIPSE_SUPPORT_FRAC:
+            supporting.append(sub)
+    return supporting
+
+
+def _ellipse_circumference_ramanujan2(a, b):
+    """Ramanujan's 2nd-order approximation of ellipse perimeter."""
+    if a + b <= 0:
+        return 0.0
+    h = ((a - b) / (a + b)) ** 2
+    return np.pi * (a + b) * (1.0 + 3.0 * h / (10.0 + np.sqrt(4.0 - 3.0 * h)))
+
+
+def _compute_confidence(ellipse, supporting_contours):
+    """Supporting-edge-length / ellipse-circumference, clipped to [0, 1]."""
+    _, (minor_d, major_d), _ = ellipse
+    if minor_d <= 0 or major_d <= 0:
+        return 0.0
+    circ = _ellipse_circumference_ramanujan2(major_d / 2.0, minor_d / 2.0)
+    if circ <= 0:
+        return 0.0
+    support_length = sum(len(sub) for sub in supporting_contours)
+    return min(support_length / circ, 1.0)
+
+
+def detect_pupil(gray_frame):
+    """Świrski / Pupil-Labs pupil detection.
+
+    Pipeline: Haar center-surround → Canny → dark/glint edge filter →
+    curvature-split sub-contours → candidate ellipse fits → combinatorial
+    support search → Ramanujan-2 confidence.
+
+    Returns (center, ellipse, confidence) in full-frame coordinates.
+    """
+    region_center, region_r = _find_pupil_region(gray_frame)
+    if region_center is None:
+        return None, None, 0.0
+
+    h, w = gray_frame.shape
+    margin = max(int(region_r * 3), 40)
+    cx, cy = region_center
+    x1 = max(0, cx - margin)
+    y1 = max(0, cy - margin)
+    x2 = min(w, cx + margin)
+    y2 = min(h, cy + margin)
+    roi = gray_frame[y1:y2, x1:x2]
+    if roi.size == 0 or min(roi.shape) < 30:
+        return None, None, 0.0
+
+    edges = cv2.Canny(roi, CANNY_LOW, CANNY_HIGH)
+    filtered = _filter_edges(edges, roi)
+
+    contours, _ = cv2.findContours(filtered, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+
+    sub_contours = []
     for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < min_area or area > max_area or len(cnt) < 5:
-            continue
-        perimeter = cv2.arcLength(cnt, True)
-        if perimeter == 0:
-            continue
-        circularity = 4 * math.pi * area / (perimeter * perimeter)
-        if circularity > 0.4 and area > best_area:
-            best_area = area
-            best_circularity = circularity
-            best_contour = cnt
-
-    if best_contour is None:
+        sub_contours.extend(_split_by_curvature(cnt))
+    if not sub_contours:
         return None, None, 0.0
 
-    ellipse = cv2.fitEllipse(best_contour)
-    center_x = int(ellipse[0][0]) + x1
-    center_y = int(ellipse[0][1]) + y1
-    ellipse = ((center_x, center_y), ellipse[1], ellipse[2])
-    return (center_x, center_y), ellipse, best_circularity
-
-
-def detect_pupil(frame, gray_frame):
-    """Detect pupil center, ellipse, and confidence."""
-    blob_center, blob_radius = _find_pupil_blob(gray_frame)
-    if blob_center is None:
+    candidates = _fit_candidate_ellipses(sub_contours, roi.shape)
+    if not candidates:
         return None, None, 0.0
 
-    center, ellipse, conf = _refine_pupil_ellipse(gray_frame, blob_center, blob_radius)
-    if center is not None:
-        return center, ellipse, conf
+    max_axis = min(roi.shape[:2]) * PUPIL_MAX_MAJOR_AXIS_FRAC
+    best_conf = 0.0
+    best_ellipse = None
+    for cand_ellipse, _ in candidates:
+        support = _find_supporting_contours(cand_ellipse, sub_contours)
+        if not support:
+            continue
+        all_pts = np.vstack([s.reshape(-1, 2) for s in support])
+        if len(all_pts) < 5:
+            continue
+        try:
+            refit = cv2.fitEllipse(all_pts)
+        except cv2.error:
+            refit = cand_ellipse
+        _, (minor_r, major_r), _ = refit
+        if minor_r < PUPIL_MIN_MINOR_AXIS or major_r > max_axis or minor_r <= 0:
+            continue
+        if major_r / minor_r > PUPIL_MAX_ASPECT:
+            continue
+        conf = _compute_confidence(refit, support)
+        if conf > best_conf:
+            best_conf = conf
+            best_ellipse = refit
 
-    # Fallback: blob center without ellipse. Low confidence so the gate skips it.
-    return blob_center, None, 0.3
+    if best_ellipse is None:
+        return None, None, best_conf
+
+    (ex, ey), axes, angle = best_ellipse
+    center = (int(ex) + x1, int(ey) + y1)
+    full_ellipse = (center, axes, angle)
+    return center, full_ellipse, best_conf
 
 
 def smooth_pupil_position(raw_center):
@@ -217,7 +396,7 @@ def process_frame(frame):
     frame = crop_to_aspect_ratio(frame)
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    pupil_center, pupil_ellipse, confidence = detect_pupil(frame, gray_frame)
+    pupil_center, pupil_ellipse, confidence = detect_pupil(gray_frame)
     last_confidence = confidence
 
     accepted = None
