@@ -7,7 +7,16 @@ to scene-camera coordinates.
 A hand-rolled reference port lives in `eyetracker_pupil.py`, along with
 `docs/pupil_detector_port_notes.md` — that file is for future port work
 and is not imported from here.
+
+TODO: pupil → screen-coord labels are only valid at the head pose they
+were collected from. Head-pose-invariant options, ascending effort:
+  (a) discipline: same seat/distance per session.
+  (b) also save scene-cam frame per sample (implicit pose signal).
+  (c) ArUco markers on screen corners + solvePnP in scene cam →
+      project screen (x,y) into scene-cam coords and train the
+      polynomial/model in scene-cam space (truly head-invariant).
 """
+import csv
 import cv2
 import math
 import numpy as np
@@ -28,7 +37,10 @@ calib_total_points = 12
 calib_collecting = False
 calib_collect_frames = []
 CALIB_SAMPLES = 15
-CALIB_STD_THRESH = 3.0
+CALIB_INLIERS = 10
+CALIB_STD_THRESH = 12.0
+CALIB_WARMUP = 5
+_calib_warmup_remaining = 0
 
 poly_coeffs_x = None
 poly_coeffs_y = None
@@ -60,6 +72,20 @@ EXT_CY = EXT_HEIGHT // 2
 
 circle_x = EXT_CX
 circle_y = EXT_CY
+
+screen_width = None
+screen_height = None
+
+calib_session_dir = None
+calib_labels_path = None
+calib_pending_rows = []
+calib_pending_image_paths = []
+
+calib_tk_root = None
+calib_tk_canvas = None
+_tk_key_queue = []
+
+last_eye_frame = None
 
 
 def detect_cameras(max_cams=10):
@@ -136,9 +162,10 @@ _last_gate_log_ts = 0.0
 
 def process_frame(frame):
     """Detect pupil, gate on confidence + outlier rejection, update last_pupil_center."""
-    global last_pupil_center, last_confidence, _last_gate_log_ts
+    global last_pupil_center, last_confidence, _last_gate_log_ts, last_eye_frame
 
     frame = crop_to_aspect_ratio(frame)
+    last_eye_frame = frame.copy()
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     pupil_center, pupil_ellipse, confidence = detect_pupil(gray_frame)
@@ -183,18 +210,27 @@ def process_frame(frame):
 
 
 def update_gaze_circle_from_current_gaze():
-    """Map current pupil position to scene-camera coords via fitted polynomial."""
+    """Map current pupil position to scene-camera coords via fitted polynomial.
+
+    Polynomial outputs gaze in screen pixels; we rescale proportionally into
+    the scene-cam window for display.
+    """
     global circle_x, circle_y
     if not calibrated or last_pupil_center is None:
         return
     if poly_coeffs_x is None or poly_coeffs_y is None:
         return
+    if screen_width is None or screen_height is None:
+        return
 
     px, py = last_pupil_center[0], last_pupil_center[1]
     feat = _build_poly_features(px, py)
 
-    u = feat @ poly_coeffs_x
-    v = feat @ poly_coeffs_y
+    u_screen = feat @ poly_coeffs_x
+    v_screen = feat @ poly_coeffs_y
+
+    u = u_screen * EXT_WIDTH / screen_width
+    v = v_screen * EXT_HEIGHT / screen_height
 
     screen_buffer.append((u, v))
     avg_u = np.mean([p[0] for p in screen_buffer])
@@ -271,6 +307,9 @@ def _save_calibration():
              poly_coeffs_y=poly_coeffs_y,
              vectors=vectors,
              points=points,
+             coord_space="screen",
+             screen_width=screen_width,
+             screen_height=screen_height,
              timestamp=time.time())
     print(f"  Calibration saved to {path}")
 
@@ -293,74 +332,206 @@ def _save_calibration():
 
 def load_calibration():
     global poly_coeffs_x, poly_coeffs_y, calibrated
+    global screen_width, screen_height
     path = _calibration_path()
     if not os.path.exists(path):
         print("No saved calibration found.")
         return False
     data = np.load(path, allow_pickle=True)
+    if "coord_space" not in data.files or str(data["coord_space"]) != "screen":
+        print("  ERROR: saved calibration predates the screen-coord flow. Recalibrate with 'c'.")
+        return False
     poly_coeffs_x = data['poly_coeffs_x']
     poly_coeffs_y = data['poly_coeffs_y']
+    screen_width = int(data['screen_width'])
+    screen_height = int(data['screen_height'])
     ts = float(data['timestamp'])
     age_hrs = (time.time() - ts) / 3600
     calibrated = True
-    print(f"Calibration loaded (age: {age_hrs:.1f}h).")
+    print(f"Calibration loaded (age: {age_hrs:.1f}h, screen={screen_width}x{screen_height}).")
     if age_hrs > 24:
         print("  WARNING: Calibration is >24h old. Consider recalibrating.")
     return True
 
 
+def _dataset_root():
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "calibration",
+    )
+
+
+def _on_tk_key(ch):
+    _tk_key_queue.append(ch)
+
+
 def start_calibration():
     global calib_state, calib_points_screen, calib_vectors_eye
     global calib_collecting, calib_collect_frames, calib_total_points
+    global screen_width, screen_height
+    global calib_session_dir, calib_labels_path
+    global calib_pending_rows, calib_pending_image_paths
+    global calib_tk_root, calib_tk_canvas, _tk_key_queue
+
     calib_state = 1
     pupil_buffer.clear()
     calib_vectors_eye = []
     calib_collecting = False
     calib_collect_frames = []
+    calib_pending_rows = []
+    calib_pending_image_paths = []
+    _tk_key_queue = []
 
-    margin_x = 40
-    margin_y = 40
+    calib_tk_root = tk.Tk()
+    calib_tk_root.configure(bg="black")
+    calib_tk_root.attributes("-fullscreen", True)
+    calib_tk_root.attributes("-topmost", True)
+    calib_tk_root.config(cursor="none")
+    calib_tk_root.update_idletasks()
+    screen_width = calib_tk_root.winfo_width()
+    screen_height = calib_tk_root.winfo_height()
+
+    calib_tk_canvas = tk.Canvas(
+        calib_tk_root,
+        width=screen_width, height=screen_height,
+        bg="black", highlightthickness=0,
+    )
+    calib_tk_canvas.pack(fill="both", expand=True)
+
+    calib_tk_root.bind("<KeyPress-c>", lambda e: _on_tk_key("c"))
+    calib_tk_root.bind("<KeyPress-q>", lambda e: _on_tk_key("q"))
+    calib_tk_root.focus_force()
+    calib_tk_root.update()
+
+    margin_x = 120
+    margin_y = 120
     cols, rows = 4, 3
     calib_points_screen = []
     for r in range(rows):
         for col in range(cols):
-            x = int(margin_x + col * (EXT_WIDTH - 2 * margin_x) / (cols - 1))
-            y = int(margin_y + r * (EXT_HEIGHT - 2 * margin_y) / (rows - 1))
+            x = int(margin_x + col * (screen_width - 2 * margin_x) / (cols - 1))
+            y = int(margin_y + r * (screen_height - 2 * margin_y) / (rows - 1))
             calib_points_screen.append((x, y))
     calib_total_points = len(calib_points_screen)
-    print(f"Calibration started ({calib_total_points} points). Look at the RED dot and press 'c'.")
+
+    session_name = f"session_{time.strftime('%Y%m%d_%H%M%S')}"
+    calib_session_dir = os.path.join(_dataset_root(), session_name)
+    os.makedirs(calib_session_dir, exist_ok=True)
+    calib_labels_path = os.path.join(calib_session_dir, "labels.csv")
+    with open(calib_labels_path, "w", newline="") as f:
+        csv.writer(f).writerow([
+            "image_path", "fixation_id", "x_screen", "y_screen",
+            "pupil_x", "pupil_y", "confidence", "timestamp",
+        ])
+
+    print(f"Calibration started ({calib_total_points} points) on {screen_width}x{screen_height} screen.")
+    print(f"  Dataset: {calib_session_dir}")
+    print("  Look at the RED dot and press 'c'.")
+
+
+def render_calibration_overlay():
+    """Fullscreen tk overlay with calibration targets in screen-pixel coords."""
+    if calib_tk_canvas is None:
+        return
+    calib_tk_canvas.delete("all")
+
+    active_idx = calib_state - 1
+    for i, pt in enumerate(calib_points_screen):
+        x, y = pt
+        if i < len(calib_vectors_eye):
+            r = 8
+            calib_tk_canvas.create_oval(x - r, y - r, x + r, y + r,
+                                        fill="#00b400", outline="")
+        elif i == active_idx:
+            r = 20
+            calib_tk_canvas.create_oval(x - r, y - r, x + r, y + r,
+                                        fill="red", outline="")
+            if calib_collecting:
+                rr = 30
+                calib_tk_canvas.create_oval(x - rr, y - rr, x + rr, y + rr,
+                                            outline="#ffa500", width=3)
+        else:
+            r = 6
+            calib_tk_canvas.create_oval(x - r, y - r, x + r, y + r,
+                                        fill="#505050", outline="")
+
+    status = f"Point {calib_state}/{calib_total_points}"
+    if calib_collecting:
+        status += f" - collecting [{len(calib_collect_frames)}/{CALIB_SAMPLES}]"
+    else:
+        status += " - press 'c' to capture, 'q' to quit"
+    calib_tk_canvas.create_text(40, 40, text=status, fill="white",
+                                anchor="nw", font=("Courier", 20))
 
 
 def begin_capture():
-    global calib_collecting, calib_collect_frames
+    global calib_collecting, calib_collect_frames, _calib_warmup_remaining
     calib_collecting = True
     calib_collect_frames = []
+    _calib_warmup_remaining = CALIB_WARMUP
 
 
 def tick_capture():
     """Collect samples for the current target. Returns True when one point is done."""
     global calib_collecting, calib_collect_frames, calib_state, calibrated
+    global calib_pending_rows, calib_pending_image_paths
+    global _calib_warmup_remaining
     if not calib_collecting:
         return False
-    if last_pupil_center is None:
+    if last_pupil_center is None or last_eye_frame is None:
         return False
+    if _calib_warmup_remaining > 0:
+        _calib_warmup_remaining -= 1
+        return False
+
+    fixation_idx = calib_state - 1
+    sample_idx = len(calib_collect_frames)
+    img_name = f"fix{fixation_idx:02d}_sample{sample_idx:02d}.png"
+    img_path = os.path.join(calib_session_dir, img_name)
+    cv2.imwrite(img_path, last_eye_frame)
+
+    target = calib_points_screen[fixation_idx]
+    px = float(last_pupil_center[0])
+    py = float(last_pupil_center[1])
+    calib_pending_rows.append([
+        img_name, fixation_idx, target[0], target[1],
+        f"{px:.3f}", f"{py:.3f}", f"{last_confidence:.4f}", f"{time.time():.3f}",
+    ])
+    calib_pending_image_paths.append(img_path)
 
     calib_collect_frames.append(last_pupil_center.copy())
     if len(calib_collect_frames) < CALIB_SAMPLES:
         return False
 
     samples = np.array(calib_collect_frames)
-    std_dev = np.std(samples, axis=0)
-    max_std = np.max(std_dev)
+    raw_std = float(np.max(np.std(samples, axis=0)))
+
+    median = np.median(samples, axis=0)
+    deviations = np.linalg.norm(samples - median, axis=1)
+    keep_idx = np.argsort(deviations)[:CALIB_INLIERS]
+    inliers = samples[keep_idx]
+    max_std = float(np.max(np.std(inliers, axis=0)))
 
     if max_std > CALIB_STD_THRESH:
-        print(f"  High variance (std={max_std:.2f}px). Retrying — hold still and press 'c'.")
+        print(f"  High variance (inlier std={max_std:.2f}px, raw std={raw_std:.2f}px). "
+              f"Retrying — hold still and press 'c'.")
+        for p in calib_pending_image_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        calib_pending_rows = []
+        calib_pending_image_paths = []
         calib_collecting = False
         calib_collect_frames = []
         return False
 
-    median_vec = np.median(samples, axis=0)
+    median_vec = np.median(inliers, axis=0)
     calib_vectors_eye.append(median_vec)
+    with open(calib_labels_path, "a", newline="") as f:
+        csv.writer(f).writerows(calib_pending_rows)
+    calib_pending_rows = []
+    calib_pending_image_paths = []
     calib_collecting = False
     calib_collect_frames = []
 
@@ -369,10 +540,22 @@ def tick_capture():
             calibrated = True
             print("Calibration Complete!")
         calib_state = 0
+        _teardown_calibration_overlay()
     else:
         calib_state += 1
         print(f"  Captured {len(calib_vectors_eye)}/{calib_total_points}. Look at next dot, press 'c'.")
     return True
+
+
+def _teardown_calibration_overlay():
+    global calib_tk_root, calib_tk_canvas
+    if calib_tk_root is not None:
+        try:
+            calib_tk_root.destroy()
+        except tk.TclError:
+            pass
+    calib_tk_root = None
+    calib_tk_canvas = None
 
 
 def process_camera():
@@ -433,43 +616,37 @@ def process_camera():
             if ret_ext:
                 ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
 
-                if calib_state > 0:
-                    target = calib_points_screen[calib_state - 1]
-                    cv2.circle(ext_frame_resized, target, 15, (0, 0, 255), -1)
-                    for i, pt in enumerate(calib_points_screen):
-                        if i < len(calib_vectors_eye):
-                            cv2.circle(ext_frame_resized, pt, 5, (0, 200, 0), -1)
-                        elif i != calib_state - 1:
-                            cv2.circle(ext_frame_resized, pt, 5, (100, 100, 100), -1)
-
-                    status_text = f"Point {calib_state}/{calib_total_points}"
-                    if calib_collecting:
-                        progress = len(calib_collect_frames)
-                        status_text += f" - collecting [{progress}/{CALIB_SAMPLES}]"
-                        cv2.circle(ext_frame_resized, target, 20, (0, 165, 255), 3)
-                    else:
-                        status_text += " - press 'c'"
-                    cv2.putText(ext_frame_resized, status_text,
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                elif calibrated:
+                if calibrated and calib_state == 0:
                     update_gaze_circle_from_current_gaze()
                     cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
 
                 cv2.imshow("External Camera (Gaze)", ext_frame_resized)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if calib_state > 0 and calib_tk_root is not None:
+            render_calibration_overlay()
+            try:
+                calib_tk_root.update()
+            except tk.TclError:
+                _teardown_calibration_overlay()
+
+        tk_key = _tk_key_queue.pop(0) if _tk_key_queue else None
+        cv_key_raw = cv2.waitKey(1) & 0xFF
+        cv_key = chr(cv_key_raw) if cv_key_raw != 255 else None
+        key = tk_key or cv_key
+
+        if key == 'q':
             break
-        elif key == ord(' '):
+        elif cv_key_raw == ord(' '):
             cv2.waitKey(0)
-        elif key == ord('l'):
+        elif key == 'l':
             load_calibration()
-        elif key == ord('c'):
+        elif key == 'c':
             if calib_state == 0:
                 start_calibration()
             elif not calib_collecting:
                 begin_capture()
 
+    _teardown_calibration_overlay()
     eye_cap.release()
     if external_cap is not None:
         external_cap.release()
