@@ -37,10 +37,18 @@ HIGH_FPS_MODE = False
 last_pupil_center = None  # np.array([x, y], dtype=float) or None if invalid
 last_confidence = 0.0
 
+# Detector selection: upstream Pupil Labs library (paper-faithful, stable) vs.
+# our hand-rolled port (kept as reference for future port work). Toggle at
+# runtime with 'p' in the Eye Camera window. See docs/pupil_detector_port_notes.md.
+USE_PUPIL_DETECTORS = True
+_pupil_detector_lib = None  # lazy-initialized; see _get_pupil_detector()
+
 # Confidence = supporting-edge-length / Ramanujan-2 ellipse circumference.
-# Pupil Labs report values up to ~0.97 on clean data; 0.3–0.6 is typical with
-# partial occlusion. Tune lower if too many frames are rejected.
-CONF_THRESH = 0.35
+# Pupil Labs report values up to ~0.97 on clean data; 0.25–0.5 is typical
+# with partial eyelid occlusion. Paper explicitly says this is user-tunable.
+# Library path uses two-tier confidence (clean pupils typically >0.8);
+# 0.25 is permissive for both detectors.
+CONF_THRESH = 0.25
 
 # Outlier rejection on pupil center — guards against the detector flipping
 # to a non-pupil blob (eyelash, eyebrow). Tune after a first calibration run.
@@ -58,25 +66,38 @@ SWIRSKI_XY_STEP = 4
 CANNY_LOW = 40
 CANNY_HIGH = 100
 
-# "Dark" pixels: darker than (1st-percentile pixel + DARK_OFFSET). Proxy for
-# Pupil Labs' "lowest spike in histogram + user offset".
-DARK_OFFSET = 25
+# "Dark" pixels: darker than (lowest-histogram-spike + DARK_OFFSET).
+# Per Pupil Labs paper, §Pupil Detection Algorithm. Tight offset keeps the
+# dark mask centered on the pupil mode; larger values leak into iris.
+DARK_OFFSET = 15
 
 # Spectral reflection (glint) cutoff; edges near these pixels are dropped.
-BRIGHT_THRESH = 200
+BRIGHT_THRESH = 180
 
 # Curvature-continuity split: if consecutive tangent vectors' dot product
-# drops below this, split the contour there.
-CURVATURE_SPLIT_DOT = 0.3
+# drops below this, split the contour there. 0.0 => only split at >=90°
+# angle changes (true eyelid/pupil junctions), not at 1-pixel Canny noise.
+CURVATURE_SPLIT_DOT = 0.0
+# Tangent look-ahead (points). Larger values smooth out single-pixel jitter
+# in Canny-traced contours, preventing spurious curvature splits.
+CURVATURE_TANGENT_LOOKAHEAD = 5
 
-PUPIL_MIN_MINOR_AXIS = 10
+PUPIL_MIN_MINOR_AXIS = 20
 PUPIL_MAX_MAJOR_AXIS_FRAC = 0.5   # of smaller ROI side
-PUPIL_MAX_ASPECT = 2.5
+PUPIL_MAX_ASPECT = 3.0
 
-# Inlier distance (px) from contour point to candidate ellipse.
-ELLIPSE_INLIER_THRESH_PX = 2.5
-# Minimum fraction of a sub-contour's points that must be inliers.
-ELLIPSE_SUPPORT_FRAC = 0.55
+# Inlier distance (px) from contour point to candidate ellipse. Accounts for
+# Canny edge jitter (~1 px) plus algebraic-distance approximation error in
+# _point_ellipse_distance_approx. Tight values undercount support when the
+# candidate is fit to a partial arc.
+ELLIPSE_INLIER_THRESH_PX = 4.0
+# Minimum inlier-point count per sub-contour to count toward support.
+# Suppresses stray edges; paper-style confidence is computed on the aggregate
+# inlier count across all contributing sub-contours.
+ELLIPSE_MIN_INLIERS_PER_SUB = 5
+
+# Runtime-toggleable debug overlay (press 'd' in the camera loop).
+DEBUG_VIEW = False
 
 calibrated = False
 
@@ -141,19 +162,27 @@ def _find_pupil_region(gray):
     for r in range(SWIRSKI_R_MIN, SWIRSKI_R_MAX + 1, SWIRSKI_R_STEP):
         if 2 * r >= min(h, w):
             break
-        xs = np.arange(2 * r, w - 2 * r, SWIRSKI_XY_STEP)
-        ys = np.arange(2 * r, h - 2 * r, SWIRSKI_XY_STEP)
+        # Inner box must stay fully in-frame; outer box is clipped at edges
+        # so pupils near the frame border are still evaluated (paper applies
+        # the center-surround response across the whole image/ROI).
+        xs = np.arange(r, w - r, SWIRSKI_XY_STEP)
+        ys = np.arange(r, h - r, SWIRSKI_XY_STEP)
         if len(xs) == 0 or len(ys) == 0:
             continue
         X, Y = np.meshgrid(xs, ys)
 
         inner = _integral_rect_sum(integral, X - r, Y - r, X + r, Y + r)
-        outer_total = _integral_rect_sum(integral, X - 2 * r, Y - 2 * r,
-                                         X + 2 * r, Y + 2 * r)
+
+        ox1 = np.clip(X - 2 * r, 0, w)
+        oy1 = np.clip(Y - 2 * r, 0, h)
+        ox2 = np.clip(X + 2 * r, 0, w)
+        oy2 = np.clip(Y + 2 * r, 0, h)
+        outer_total = _integral_rect_sum(integral, ox1, oy1, ox2, oy2)
         outer = outer_total - inner
 
         inner_area = (2 * r) ** 2
-        outer_area = (4 * r) ** 2 - inner_area
+        outer_area = (ox2 - ox1) * (oy2 - oy1) - inner_area
+        outer_area = np.maximum(outer_area, 1)
         response = outer.astype(float) / outer_area - inner.astype(float) / inner_area
 
         idx = np.unravel_index(np.argmax(response), response.shape)
@@ -166,14 +195,23 @@ def _find_pupil_region(gray):
 
 
 def _find_dark_threshold(roi):
-    """Pixel value below which a pixel counts as 'dark'.
+    """Lowest spike in pixel-intensity histogram + DARK_OFFSET.
 
-    Paper: offset from lowest spike in intensity histogram. Proxy here:
-    1st-percentile pixel + DARK_OFFSET — robust to hot pixels, no peak-finding
-    dependency.
+    Matches Pupil Labs paper (§Pupil Detection Algorithm): "Dark is specified
+    using a user set offset of the lowest spike in the histogram of pixel
+    intensities in the eye image." The dark-pupil mode is the first local
+    maximum walking from intensity 0 upward. Heavy smoothing (15-tap Gaussian)
+    absorbs noise-driven micro-peaks; no mass threshold so the real pupil
+    peak is found even when it is a small fraction of the ROI.
     """
-    darkest = int(np.percentile(roi, 1))
-    return darkest + DARK_OFFSET
+    hist = cv2.calcHist([roi], [0], None, [256], [0, 256]).flatten()
+    hist_smooth = cv2.GaussianBlur(hist.reshape(-1, 1), (15, 1), 0).flatten()
+    for i in range(1, 255):
+        if (hist_smooth[i] > 0
+                and hist_smooth[i] >= hist_smooth[i - 1]
+                and hist_smooth[i] >= hist_smooth[i + 1]):
+            return i + DARK_OFFSET
+    return int(np.percentile(roi, 1)) + DARK_OFFSET
 
 
 def _find_spectral_mask(roi):
@@ -184,7 +222,11 @@ def _find_spectral_mask(roi):
 
 
 def _filter_edges(edges, roi):
-    """Keep edges on dark-region boundaries; drop edges near glints."""
+    """Keep edges on dark-region boundaries; drop edges near glints.
+
+    Returns (filtered_edges, dark_mask, bright_mask) so callers (and the
+    debug view) can inspect each stage.
+    """
     dark_thresh = _find_dark_threshold(roi)
     dark_mask = ((roi < dark_thresh).astype(np.uint8)) * 255
     # Dilate so edges on the dark/light transition still pass the gate.
@@ -195,7 +237,7 @@ def _filter_edges(edges, roi):
 
     filtered = cv2.bitwise_and(edges, dark_mask)
     filtered = cv2.bitwise_and(filtered, cv2.bitwise_not(bright_mask))
-    return filtered
+    return filtered, dark_mask, bright_mask
 
 
 def _split_by_curvature(contour):
@@ -205,7 +247,7 @@ def _split_by_curvature(contour):
     if n < 7:
         return [contour] if n >= 5 else []
 
-    k = 3  # look-ahead for tangent estimation
+    k = CURVATURE_TANGENT_LOOKAHEAD
     tangents = np.zeros((n, 2), dtype=float)
     for i in range(n):
         forward = pts[(i + k) % n] - pts[i]
@@ -269,15 +311,27 @@ def _point_ellipse_distance_approx(points, ellipse):
     return np.abs(d_normed - 1.0) * (a + b) / 2.0
 
 
-def _find_supporting_contours(ellipse, sub_contours):
-    """Sub-contours with at least ELLIPSE_SUPPORT_FRAC of points near the ellipse."""
+def _find_supporting_points(ellipse, sub_contours):
+    """Per Pupil Labs paper: aggregate inlier points across all sub-contours.
+
+    Returns a list of arrays of inlier points (float, shape (k, 2)) — one
+    entry per sub-contour that contributes at least
+    ELLIPSE_MIN_INLIERS_PER_SUB points within ELLIPSE_INLIER_THRESH_PX of the
+    candidate ellipse.
+
+    Earlier per-sub-contour support-fraction gate has been removed: it
+    rejected fragmented-rim pupils (eyelid occlusion, glint cutout), because
+    no fragment was individually >= frac of the circumference. The paper
+    confidence metric is support_length / circumference across all
+    supporting edges combined, which is what _compute_confidence does below.
+    """
     supporting = []
     for sub in sub_contours:
         pts = sub.reshape(-1, 2).astype(float)
         dists = _point_ellipse_distance_approx(pts, ellipse)
-        inliers = dists < ELLIPSE_INLIER_THRESH_PX
-        if len(inliers) > 0 and inliers.mean() >= ELLIPSE_SUPPORT_FRAC:
-            supporting.append(sub)
+        inlier_mask = dists < ELLIPSE_INLIER_THRESH_PX
+        if inlier_mask.sum() >= ELLIPSE_MIN_INLIERS_PER_SUB:
+            supporting.append(pts[inlier_mask])
     return supporting
 
 
@@ -289,29 +343,66 @@ def _ellipse_circumference_ramanujan2(a, b):
     return np.pi * (a + b) * (1.0 + 3.0 * h / (10.0 + np.sqrt(4.0 - 3.0 * h)))
 
 
-def _compute_confidence(ellipse, supporting_contours):
-    """Supporting-edge-length / ellipse-circumference, clipped to [0, 1]."""
+def _compute_confidence(ellipse, supporting_points):
+    """Supporting-edge-length / ellipse-circumference, clipped to [0, 1].
+
+    supporting_points is a list of inlier point arrays (from
+    _find_supporting_points) — one array per contributing sub-contour.
+    """
     _, (minor_d, major_d), _ = ellipse
     if minor_d <= 0 or major_d <= 0:
         return 0.0
     circ = _ellipse_circumference_ramanujan2(major_d / 2.0, minor_d / 2.0)
     if circ <= 0:
         return 0.0
-    support_length = sum(len(sub) for sub in supporting_contours)
+    support_length = sum(len(pts) for pts in supporting_points)
     return min(support_length / circ, 1.0)
+
+
+def _get_pupil_detector():
+    """Lazy-load Pupil Labs' Detector2D. Import is local so the script still
+    runs (with USE_PUPIL_DETECTORS=False) when the library isn't installed.
+    """
+    global _pupil_detector_lib
+    if _pupil_detector_lib is None:
+        from pupil_detectors import Detector2D
+        _pupil_detector_lib = Detector2D()
+    return _pupil_detector_lib
+
+
+def detect_pupil_via_library(gray_frame):
+    """Adapter around pupil_detectors.Detector2D.detect().
+
+    Returns (center, ellipse, confidence) in the same format as detect_pupil:
+    - center: (int, int) for cv2.circle
+    - ellipse: ((cx, cy), (minor, major), angle_deg) for cv2.ellipse
+      (the library already shifts angle by -90° to OpenCV's convention)
+    """
+    result = _get_pupil_detector().detect(gray_frame)
+    conf = float(result["confidence"])
+    if conf <= 0.0:
+        return None, None, 0.0
+    ell = result["ellipse"]
+    cx, cy = ell["center"]
+    center_int = (int(round(cx)), int(round(cy)))
+    ellipse_tuple = ((cx, cy), ell["axes"], ell["angle"])
+    return center_int, ellipse_tuple, conf
 
 
 def detect_pupil(gray_frame):
     """Świrski / Pupil-Labs pupil detection.
 
     Pipeline: Haar center-surround → Canny → dark/glint edge filter →
-    curvature-split sub-contours → candidate ellipse fits → combinatorial
-    support search → Ramanujan-2 confidence.
+    curvature-split sub-contours → candidate ellipse fits → support search
+    (paper-style: aggregate inlier points across sub-contours) →
+    Ramanujan-2 confidence.
 
     Returns (center, ellipse, confidence) in full-frame coordinates.
     """
     region_center, region_r = _find_pupil_region(gray_frame)
     if region_center is None:
+        if DEBUG_VIEW:
+            _show_debug_view(gray_frame, None, None, None, None, None, [], None)
         return None, None, 0.0
 
     h, w = gray_frame.shape
@@ -326,43 +417,58 @@ def detect_pupil(gray_frame):
         return None, None, 0.0
 
     edges = cv2.Canny(roi, CANNY_LOW, CANNY_HIGH)
-    filtered = _filter_edges(edges, roi)
+    filtered, dark_mask, bright_mask = _filter_edges(edges, roi)
 
     contours, _ = cv2.findContours(filtered, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
     sub_contours = []
     for cnt in contours:
         sub_contours.extend(_split_by_curvature(cnt))
-    if not sub_contours:
-        return None, None, 0.0
 
-    candidates = _fit_candidate_ellipses(sub_contours, roi.shape)
-    if not candidates:
-        return None, None, 0.0
-
-    max_axis = min(roi.shape[:2]) * PUPIL_MAX_MAJOR_AXIS_FRAC
     best_conf = 0.0
     best_ellipse = None
-    for cand_ellipse, _ in candidates:
-        support = _find_supporting_contours(cand_ellipse, sub_contours)
-        if not support:
-            continue
-        all_pts = np.vstack([s.reshape(-1, 2) for s in support])
-        if len(all_pts) < 5:
-            continue
-        try:
-            refit = cv2.fitEllipse(all_pts)
-        except cv2.error:
-            refit = cand_ellipse
-        _, (minor_r, major_r), _ = refit
-        if minor_r < PUPIL_MIN_MINOR_AXIS or major_r > max_axis or minor_r <= 0:
-            continue
-        if major_r / minor_r > PUPIL_MAX_ASPECT:
-            continue
-        conf = _compute_confidence(refit, support)
-        if conf > best_conf:
-            best_conf = conf
-            best_ellipse = refit
+    tried = []  # for debug view: (ellipse, confidence) per evaluated candidate
+
+    if sub_contours:
+        candidates = _fit_candidate_ellipses(sub_contours, roi.shape)
+        max_axis = min(roi.shape[:2]) * PUPIL_MAX_MAJOR_AXIS_FRAC
+        bh, bw = bright_mask.shape
+        for cand_ellipse, _ in candidates:
+            support_pts = _find_supporting_points(cand_ellipse, sub_contours)
+            if not support_pts:
+                continue
+            all_pts = np.vstack(support_pts).astype(np.float32)
+            if len(all_pts) < 5:
+                continue
+            try:
+                refit = cv2.fitEllipse(all_pts)
+            except cv2.error:
+                refit = cand_ellipse
+            _, (minor_r, major_r), _ = refit
+            if minor_r < PUPIL_MIN_MINOR_AXIS or major_r > max_axis or minor_r <= 0:
+                continue
+            if major_r / minor_r > PUPIL_MAX_ASPECT:
+                continue
+            # Reject glint lock-on: an ellipse whose center sits on a
+            # spectral-reflection pixel is a fitted glint, not a pupil.
+            ex_loc, ey_loc = refit[0]
+            ix, iy = int(ex_loc), int(ey_loc)
+            if 0 <= iy < bh and 0 <= ix < bw and bright_mask[iy, ix] > 0:
+                continue
+            # Re-score support against the refit ellipse (paper's "augmented"
+            # step — the winning ellipse's confidence is measured from the
+            # contours that actually support *it*, not the pre-refit candidate).
+            refit_support = _find_supporting_points(refit, sub_contours)
+            conf = _compute_confidence(refit, refit_support)
+            tried.append((refit, conf))
+            if conf > best_conf:
+                best_conf = conf
+                best_ellipse = refit
+
+    if DEBUG_VIEW:
+        _show_debug_view(roi, (region_center, region_r, x1, y1),
+                         edges, dark_mask, bright_mask, filtered,
+                         tried, best_ellipse)
 
     if best_ellipse is None:
         return None, None, best_conf
@@ -371,6 +477,63 @@ def detect_pupil(gray_frame):
     center = (int(ex) + x1, int(ey) + y1)
     full_ellipse = (center, axes, angle)
     return center, full_ellipse, best_conf
+
+
+def _show_debug_view(roi, haar_info, edges, dark_mask, bright_mask, filtered,
+                     tried_ellipses, best_ellipse):
+    """Compose a 2x3 diagnostic grid: ROI, Canny, dark mask, bright mask,
+    filtered edges, candidates+winner. Grey candidates, green winner.
+    """
+    def to_bgr(img):
+        if img is None:
+            return np.zeros((240, 240, 3), dtype=np.uint8)
+        if img.ndim == 2:
+            return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        return img.copy()
+
+    base_roi = to_bgr(roi)
+    if haar_info is not None:
+        (hc, hr, _x1, _y1) = haar_info
+        if hc is not None:
+            local = (hc[0] - _x1, hc[1] - _y1)
+            cv2.circle(base_roi, local, 3, (0, 0, 255), -1)
+            cv2.rectangle(base_roi, (local[0] - hr, local[1] - hr),
+                          (local[0] + hr, local[1] + hr), (0, 0, 255), 1)
+
+    cand_img = to_bgr(roi)
+    for ellipse, _conf in tried_ellipses:
+        if best_ellipse is not None and ellipse is best_ellipse:
+            continue
+        try:
+            cv2.ellipse(cand_img, ellipse, (120, 120, 120), 1)
+        except cv2.error:
+            pass
+    if best_ellipse is not None:
+        try:
+            cv2.ellipse(cand_img, best_ellipse, (0, 255, 0), 2)
+        except cv2.error:
+            pass
+
+    panels = [
+        ("ROI+Haar", base_roi),
+        ("Canny", to_bgr(edges)),
+        ("Dark mask", to_bgr(dark_mask)),
+        ("Bright mask", to_bgr(bright_mask)),
+        ("Filtered", to_bgr(filtered)),
+        (f"Candidates ({len(tried_ellipses)})", cand_img),
+    ]
+
+    cell_w, cell_h = 240, 240
+    resized = []
+    for label, img in panels:
+        r = cv2.resize(img, (cell_w, cell_h))
+        cv2.putText(r, label, (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                    (0, 255, 255), 1)
+        resized.append(r)
+
+    row1 = np.hstack(resized[:3])
+    row2 = np.hstack(resized[3:])
+    cv2.imshow("Debug View", np.vstack([row1, row2]))
 
 
 def smooth_pupil_position(raw_center):
@@ -389,14 +552,20 @@ def smooth_pupil_position(raw_center):
     return raw
 
 
+_last_gate_log_ts = 0.0
+
+
 def process_frame(frame):
     """Detect pupil, gate on confidence + outlier rejection, update last_pupil_center."""
-    global last_pupil_center, last_confidence
+    global last_pupil_center, last_confidence, _last_gate_log_ts
 
     frame = crop_to_aspect_ratio(frame)
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    pupil_center, pupil_ellipse, confidence = detect_pupil(gray_frame)
+    if USE_PUPIL_DETECTORS:
+        pupil_center, pupil_ellipse, confidence = detect_pupil_via_library(gray_frame)
+    else:
+        pupil_center, pupil_ellipse, confidence = detect_pupil(gray_frame)
     last_confidence = confidence
 
     accepted = None
@@ -416,6 +585,11 @@ def process_frame(frame):
         cv2.circle(frame, (15, 15), 8, (0, 0, 255), -1)
         cv2.putText(frame, "SKIP", (28, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        if pupil_center is not None and confidence > 0:
+            now = time.time()
+            if now - _last_gate_log_ts >= 1.0:
+                print(f"[gate] conf={confidence:.2f} below CONF_THRESH={CONF_THRESH}")
+                _last_gate_log_ts = now
 
     cv2.imshow("Eye Camera", frame)
 
@@ -615,6 +789,7 @@ def tick_capture():
 
 def process_camera():
     global selected_camera, circle_x, circle_y, calibrated
+    global USE_PUPIL_DETECTORS, DEBUG_VIEW
 
     try:
         cam_index = int(selected_camera.get())
@@ -653,7 +828,8 @@ def process_camera():
         cv2.namedWindow("External Camera (Gaze)")
         cv2.moveWindow("External Camera (Gaze)", 720, 50)
 
-    print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
+    print("Controls: 'c' = calibrate, 'l' = load calibration, 'd' = toggle debug view, 'p' = toggle detector (library/hand-rolled), 'q' = quit, space = pause")
+    print(f"Detector: {'pupil_detectors library' if USE_PUPIL_DETECTORS else 'hand-rolled'}")
 
     while True:
         ret_eye, eye_frame = eye_cap.read()
@@ -703,6 +879,17 @@ def process_camera():
             cv2.waitKey(0)
         elif key == ord('l'):
             load_calibration()
+        elif key == ord('d'):
+            DEBUG_VIEW = not DEBUG_VIEW
+            if not DEBUG_VIEW:
+                try:
+                    cv2.destroyWindow("Debug View")
+                except cv2.error:
+                    pass
+            print(f"Debug view: {'ON' if DEBUG_VIEW else 'OFF'}")
+        elif key == ord('p'):
+            USE_PUPIL_DETECTORS = not USE_PUPIL_DETECTORS
+            print(f"Detector: {'pupil_detectors library' if USE_PUPIL_DETECTORS else 'hand-rolled'}")
         elif key == ord('c'):
             if calib_state == 0:
                 start_calibration()
