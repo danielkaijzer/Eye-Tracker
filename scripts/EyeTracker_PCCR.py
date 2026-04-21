@@ -9,7 +9,7 @@ import time
 import socket
 import json
 from collections import deque
-udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # TODO: Setup UDP stream
 
 BUFFER_SIZE = 5  # Small enough to be responsive, large enough to stop jitter
 screen_buffer = deque(maxlen=BUFFER_SIZE)
@@ -46,9 +46,9 @@ NUM_GLINTS = 2                # expected LED count
 EXPECTED_GLINT_DIST = 12.0   # expected pixel distance between two IR LEDs
 GLINT_DIST_TOLERANCE = 8.0   # +/- tolerance for inter-glint distance
 
-PCCR_BUFFER_SIZE = 5          # frames of history
+PCCR_BUFFER_SIZE = 7          # frames of history
 pccr_buffer = deque(maxlen=PCCR_BUFFER_SIZE)  # recent valid PCCR vectors for median
-PCCR_JUMP_THRESH = 30.0       # max pixel jump from running median to accept
+PCCR_JUMP_THRESH = 1000.0       # max pixel jump from running median to accept
 
 calibrated = False
 
@@ -87,154 +87,73 @@ def crop_to_aspect_ratio(image, width=640, height=480):
 
     return cv2.resize(cropped_img, (width, height))
 
-def apply_binary_threshold(image, darkestPixelValue, addedThreshold):
-    threshold = darkestPixelValue + addedThreshold
-    _, thresholded_image = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY_INV)
-    return thresholded_image
+def _find_pupil_blob(gray_frame):
+    """Stage 1: Find pupil candidate using blob detection for dark, circular blobs."""
+    params = cv2.SimpleBlobDetector_Params()
 
-def get_darkest_area(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.blur(gray, (20, 20))
-    margin = 20
-    roi = blurred[margin:-margin, margin:-margin]
-    min_loc = cv2.minMaxLoc(roi)[3]
-    return (min_loc[0] + margin, min_loc[1] + margin)
+    params.filterByColor = True
+    params.blobColor = 0  # dark blobs
 
-def mask_outside_square(image, center, size):
-    x, y = center
-    half_size = size // 2
-    mask = np.zeros_like(image)
-    top_left_x = max(0, x - half_size)
-    top_left_y = max(0, y - half_size)
-    bottom_right_x = min(image.shape[1], x + half_size)
-    bottom_right_y = min(image.shape[0], y + half_size)
-    mask[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = 255
-    return cv2.bitwise_and(image, mask)
+    params.filterByArea = True
+    params.minArea = 300
+    params.maxArea = 15000
 
-def optimize_contours_by_angle(contours):
-    if len(contours) < 1:
-        return contours
+    params.filterByCircularity = True
+    params.minCircularity = 0.5
 
-    all_contours = np.concatenate(contours[0], axis=0)
-    spacing = int(len(all_contours)/25)
-    filtered_points = []
-    centroid = np.mean(all_contours, axis=0)
-    cos_threshold = np.cos(np.radians(60))
+    params.filterByConvexity = True
+    params.minConvexity = 0.7
 
-    for i in range(0, len(all_contours), 1):
-        current_point = all_contours[i]
-        prev_point = all_contours[i - spacing] if i - spacing >= 0 else all_contours[-spacing]
-        next_point = all_contours[i + spacing] if i + spacing < len(all_contours) else all_contours[spacing]
+    params.filterByInertia = True
+    params.minInertiaRatio = 0.4
 
-        vec1 = prev_point - current_point
-        vec2 = next_point - current_point
-        bisector = (vec1 + vec2) / 2.0
-        vec_to_centroid = centroid - current_point
+    detector = cv2.SimpleBlobDetector_create(params)
+    keypoints = detector.detect(gray_frame)
 
-        norm_b = np.linalg.norm(bisector)
-        norm_c = np.linalg.norm(vec_to_centroid)
-        if norm_b > 0 and norm_c > 0:
-            cos_angle = np.dot(vec_to_centroid, bisector) / (norm_c * norm_b)
-            if cos_angle >= cos_threshold:
-                filtered_points.append(current_point)
-
-    return np.array(filtered_points, dtype=np.int32).reshape((-1, 1, 2))
-
-def filter_contours_by_area_and_return_largest(contours, pixel_thresh, ratio_thresh):
-    max_area = 0
-    largest_contour = None
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area >= pixel_thresh:
-            x, y, w, h = cv2.boundingRect(contour)
-            length_to_width_ratio = max(w / h, h / w)
-            if length_to_width_ratio <= ratio_thresh:
-                if area > max_area:
-                    max_area = area
-                    largest_contour = contour
-    return [largest_contour] if largest_contour is not None else []
-
-def check_contour_pixels(contour, image_shape):
-    if len(contour) < 5:
-        return [0, 0, None]
-
-    contour_mask = np.zeros(image_shape, dtype=np.uint8)
-    cv2.drawContours(contour_mask, [contour], -1, (255), 1)
-
-    ellipse_mask_thick = np.zeros(image_shape, dtype=np.uint8)
-    ellipse_mask_thin = np.zeros(image_shape, dtype=np.uint8)
-    ellipse = cv2.fitEllipse(contour)
-
-    cv2.ellipse(ellipse_mask_thick, ellipse, (255), 10)
-    cv2.ellipse(ellipse_mask_thin, ellipse, (255), 4)
-
-    overlap_thick = cv2.bitwise_and(contour_mask, ellipse_mask_thick)
-    overlap_thin = cv2.bitwise_and(contour_mask, ellipse_mask_thin)
-
-    absolute_pixel_total_thick = np.sum(overlap_thick > 0)
-    absolute_pixel_total_thin = np.sum(overlap_thin > 0)
-
-    total_border_pixels = np.sum(contour_mask > 0)
-    ratio_under_ellipse = absolute_pixel_total_thin / total_border_pixels if total_border_pixels > 0 else 0
-
-    return [absolute_pixel_total_thick, ratio_under_ellipse, overlap_thin]
-
-def check_ellipse_goodness(binary_image, contour):
-    ellipse_goodness = [0,0,0]
-    if len(contour) < 5:
-        return ellipse_goodness
-
-    ellipse = cv2.fitEllipse(contour)
-    mask = np.zeros_like(binary_image)
-    cv2.ellipse(mask, ellipse, (255), -1)
-
-    ellipse_area = np.sum(mask == 255)
-    covered_pixels = np.sum((binary_image == 255) & (mask == 255))
-
-    if ellipse_area == 0:
-        return ellipse_goodness
-
-    ellipse_goodness[0] = covered_pixels / ellipse_area
-    ellipse_goodness[2] = min(ellipse[1][1]/ellipse[1][0], ellipse[1][0]/ellipse[1][1])
-
-    return ellipse_goodness
-
-def _detect_pupil_adaptive(gray_frame, darkest_point):
-    """Fallback pupil detection using adaptive thresholding for IR washout."""
-    h, w = gray_frame.shape[:2]
-
-    # ROI size scales with frame dimensions (~40% of shorter dimension)
-    roi_half = int(min(h, w) * 0.2)
-    dx, dy = darkest_point
-    x1 = max(0, dx - roi_half)
-    y1 = max(0, dy - roi_half)
-    x2 = min(w, dx + roi_half)
-    y2 = min(h, dy + roi_half)
-    roi = gray_frame[y1:y2, x1:x2]
-
-    if roi.size == 0:
+    if not keypoints:
         return None, None
 
-    # Adaptive threshold detects local contrast edges (works when pupil isn't darkest)
+    # Pick blob closest to frame center
+    h, w = gray_frame.shape[:2]
+    cx, cy = w / 2, h / 2
+    best = min(keypoints, key=lambda kp: (kp.pt[0] - cx)**2 + (kp.pt[1] - cy)**2)
+    center = (int(best.pt[0]), int(best.pt[1]))
+    radius = best.size / 2
+    return center, radius
+
+
+def _refine_pupil_ellipse(gray_frame, blob_center, blob_radius):
+    """Stage 2: Refine blob into a precise ellipse using adaptive threshold in local ROI."""
+    h, w = gray_frame.shape[:2]
+    margin = int(blob_radius * 2.5)
+    bx, by = blob_center
+
+    x1 = max(0, bx - margin)
+    y1 = max(0, by - margin)
+    x2 = min(w, bx + margin)
+    y2 = min(h, by + margin)
+    roi = gray_frame[y1:y2, x1:x2]
+
+    if roi.size == 0 or min(roi.shape[:2]) < 15:
+        return None, None
+
     block = 15 if min(roi.shape[:2]) > 30 else 7
     binary = cv2.adaptiveThreshold(
         roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
         blockSize=block, C=5
     )
 
-    # Morphological close to fill glint holes inside pupil
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k, iterations=2)
 
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Area bounds scale with ROI dimensions
     roi_area = roi.shape[0] * roi.shape[1]
     min_area = roi_area * 0.02
     max_area = roi_area * 0.8
 
     best_contour = None
-    best_area = 0
+    best_score = 0
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if area < min_area or area > max_area or len(cnt) < 5:
@@ -243,15 +162,14 @@ def _detect_pupil_adaptive(gray_frame, darkest_point):
         if perimeter == 0:
             continue
         circularity = 4 * math.pi * area / (perimeter * perimeter)
-        if circularity > 0.4 and area > best_area:
-            best_area = area
+        if circularity > 0.4 and area > best_score:
+            best_score = area
             best_contour = cnt
 
     if best_contour is None:
         return None, None
 
     ellipse = cv2.fitEllipse(best_contour)
-    # Shift ellipse center back to full-frame coordinates
     center_x = int(ellipse[0][0]) + x1
     center_y = int(ellipse[0][1]) + y1
     ellipse = ((center_x, center_y), ellipse[1], ellipse[2])
@@ -259,52 +177,20 @@ def _detect_pupil_adaptive(gray_frame, darkest_point):
 
 
 def detect_pupil(frame, gray_frame):
-    """Detect pupil center and ellipse using multi-threshold approach."""
-    darkest_point = get_darkest_area(frame)
-    darkest_pixel_value = gray_frame[darkest_point[1], darkest_point[0]]
+    """Detect pupil center and ellipse using blob detection + local refinement."""
+    blob_center, blob_radius = _find_pupil_blob(gray_frame)
 
-    mask_size = int(gray_frame.shape[1] * 0.4)
-    thresholded_strict = apply_binary_threshold(gray_frame, darkest_pixel_value, 5)
-    thresholded_strict = mask_outside_square(thresholded_strict, darkest_point, mask_size)
-    thresholded_medium = apply_binary_threshold(gray_frame, darkest_pixel_value, 15)
-    thresholded_medium = mask_outside_square(thresholded_medium, darkest_point, mask_size)
-    thresholded_relaxed = apply_binary_threshold(gray_frame, darkest_pixel_value, 25)
-    thresholded_relaxed = mask_outside_square(thresholded_relaxed, darkest_point, mask_size)
-
-    image_array = [thresholded_relaxed, thresholded_medium, thresholded_strict]
-
-    # Dynamic Elliptical Kernel
-    k_size = int(gray_frame.shape[1] * 0.025)
-    k_size = k_size if k_size % 2 != 0 else k_size + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
-
-    best_goodness = 0
-    best_contours = []
-
-    for thresh_img in image_array:
-        dilated = cv2.morphologyEx(thresh_img, cv2.MORPH_CLOSE, kernel, iterations=2)
-        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        reduced = filter_contours_by_area_and_return_largest(contours, 1000, 3)
-
-        if len(reduced) > 0 and len(reduced[0]) > 5:
-            current_goodness = check_ellipse_goodness(dilated, reduced[0])
-            total_pixels = check_contour_pixels(reduced[0], dilated.shape)
-            final_goodness = current_goodness[0] * total_pixels[0] * total_pixels[0] * total_pixels[1]
-
-            if final_goodness > 0 and final_goodness > best_goodness:
-                best_goodness = final_goodness
-                best_contours = reduced
-
-    if not best_contours:
-        return _detect_pupil_adaptive(gray_frame, darkest_point)
-
-    optimized = optimize_contours_by_angle(best_contours)
-    if optimized is None or len(optimized) < 5:
+    if blob_center is None:
         return None, None
 
-    ellipse = cv2.fitEllipse(optimized)
-    center = (int(ellipse[0][0]), int(ellipse[0][1]))
-    return center, ellipse
+    # Try to refine blob into a precise ellipse
+    center, ellipse = _refine_pupil_ellipse(gray_frame, blob_center, blob_radius)
+
+    if center is not None:
+        return center, ellipse
+
+    # Fallback: use blob center directly (no ellipse)
+    return blob_center, None
 
 def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
     """Detect IR glints (corneal reflections) near the pupil.
@@ -326,23 +212,28 @@ def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
     if roi.size == 0:
         return None, None
 
-    # Threshold at top ~2% brightness within ROI
-    thresh_val = np.percentile(roi, 98)
-    _, binary = cv2.threshold(roi, int(thresh_val), 255, cv2.THRESH_BINARY)
+    # Light blur to merge fragmented glint pixels while keeping the spot compact
+    roi_blur = cv2.GaussianBlur(roi, (3, 3), 0)
+
+    # Use a high fixed threshold first (glints are near-saturated in IR images).
+    # Fall back to top ~0.5% brightness if no candidates are found.
+    max_val = int(np.max(roi_blur))
+    fixed_thresh = max(200, max_val - 30)
+    _, binary = cv2.threshold(roi_blur, fixed_thresh, 255, cv2.THRESH_BINARY)
 
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates = _extract_glint_candidates(contours, x1, y1, px, py)
 
-    # Filter by area and compute centroids
-    candidates = []
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if GLINT_MIN_AREA <= area <= GLINT_MAX_AREA:
-            M = cv2.moments(cnt)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"]) + x1  # convert to full-frame coords
-                cy = int(M["m01"] / M["m00"]) + y1
-                dist = math.sqrt((cx - px)**2 + (cy - py)**2)
-                candidates.append((cx, cy, dist))
+    # Fallback: adaptive percentile threshold if fixed threshold found nothing
+    if not candidates:
+        thresh_val = np.percentile(roi_blur, 99.5)
+        if thresh_val < max_val:
+            _, binary = cv2.threshold(roi_blur, int(thresh_val), 255, cv2.THRESH_BINARY)
+            # Dilate slightly to merge adjacent bright pixels into a single blob
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            binary = cv2.dilate(binary, k, iterations=1)
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            candidates = _extract_glint_candidates(contours, x1, y1, px, py)
 
     if not candidates:
         return None, None
@@ -366,6 +257,21 @@ def detect_glints(gray_frame, pupil_center, search_radius=GLINT_SEARCH_RADIUS):
     glint_centroid = (centroid_x, centroid_y)
 
     return glint_centroid, glint_points
+
+
+def _extract_glint_candidates(contours, x1, y1, px, py):
+    """Filter contours by area and return candidate glint centroids."""
+    candidates = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if GLINT_MIN_AREA <= area <= GLINT_MAX_AREA:
+            M = cv2.moments(cnt)
+            if M["m00"] > 0:
+                cx = int(M["m10"] / M["m00"]) + x1
+                cy = int(M["m01"] / M["m00"]) + y1
+                dist = math.sqrt((cx - px)**2 + (cy - py)**2)
+                candidates.append((cx, cy, dist))
+    return candidates
 
 def smooth_pccr_vector(raw_vector):
     """Reject outlier PCCR vectors that jump too far from the running median.
@@ -474,7 +380,7 @@ def update_gaze_circle_from_current_gaze():
     # Broadcast gaze coordinates locally on port 5005
     # TODO: Use this for YOLO object recognition on front camera feed (separate script)
     # so that I know when a person is looking at an object
-    udp_sock.sendto(json.dumps({"x": circle_x, "y": circle_y}).encode(), ("127.0.0.1", 5005))
+    # udp_sock.sendto(json.dumps({"x": circle_x, "y": circle_y}).encode(), ("127.0.0.1", 5005))
 
 
 def _build_poly_features(gx, gy):
@@ -748,7 +654,7 @@ def process_camera():
     eye_cap.release()
     if external_cap is not None:
         external_cap.release()
-    udp_sock.close()
+    # udp_sock.close()
     cv2.destroyAllWindows()
 
 def process_video():
@@ -769,7 +675,7 @@ def process_video():
         elif key == ord(' '):
             cv2.waitKey(0)
     cap.release()
-    udp_sock.close()
+    # udp_sock.close()
     cv2.destroyAllWindows()
 
 def selection_gui():

@@ -758,15 +758,11 @@ def index():
     return '''
     <html>
       <head>
-        <title>Eye Tracker Headless Stream</title>
+        <title>Eye Tracker Stream</title>
       </head>
       <body style="font-family: sans-serif;">
         <h2>Eye Tracker Headless Streams</h2>
         <div style="display: flex; flex-wrap: wrap; gap: 20px;">
-          <div>
-            <h3>Eye Camera (Clean)</h3>
-            <img src="/cam0" width="640" height="480">
-          </div>
           <div>
             <h3>Eye Camera (Processed Overlay)</h3>
             <img src="/cam2" width="640" height="480">
@@ -785,8 +781,8 @@ def index():
 
 if __name__ == "__main__":
     # Start the camera processing in a background thread
-    cam_thread = threading.Thread(target=process_camera_headless, args=(0, 2), daemon=True)
+    cam_thread = threading.Thread(target=process_camera_headless, args=(1, 0), daemon=True)
     cam_thread.start()
     
     # Run the Flask app
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    app.run(host='0.0.0.0', port=5001, threaded=True)
