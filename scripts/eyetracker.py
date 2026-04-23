@@ -8,13 +8,6 @@ A hand-rolled reference port lives in `eyetracker_pupil.py`, along with
 `docs/pupil_detector_port_notes.md` — that file is for future port work
 and is not imported from here.
 
-TODO: pupil → screen-coord labels are only valid at the head pose they
-were collected from. Head-pose-invariant options, ascending effort:
-  (a) discipline: same seat/distance per session.
-  (b) also save scene-cam frame per sample (implicit pose signal).
-  (c) ArUco markers on screen corners + solvePnP in scene cam →
-      project screen (x,y) into scene-cam coords and train the
-      polynomial/model in scene-cam space (truly head-invariant).
 """
 import csv
 import cv2
@@ -40,7 +33,9 @@ CALIB_SAMPLES = 15
 CALIB_INLIERS = 10
 CALIB_STD_THRESH = 12.0
 CALIB_WARMUP = 5
+CALIB_MAX_RETRIES = 3
 _calib_warmup_remaining = 0
+_calib_retries_at_point = 0
 
 poly_coeffs_x = None
 poly_coeffs_y = None
