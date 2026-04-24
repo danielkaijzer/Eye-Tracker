@@ -6,12 +6,13 @@ Pipeline:
 - A 2nd-degree bivariate polynomial maps pupil pixel directly to scene-cam
   pixel. No screen-pixel rescale at inference time — the mapping is
   head-pose invariant for the gaze-on-scene use case.
-- Calibration shows 12 red dots fullscreen on the monitor; the dot is
-  detected in the scene cam, and that scene-cam pixel is the training
-  label. Training in scene-cam space is what makes the fit head-invariant.
-- ArUco markers at the four screen corners enable a screen<->scene-cam
-  homography (`detect_aruco_homography`); `screen_pixel_for_scene_gaze`
-  is stubbed for future inference-time screen-pixel mapping.
+- Calibration shows 12 red dots fullscreen on the monitor. ArUco markers
+  at the four screen corners give a screen<->scene-cam homography
+  (`detect_aruco_homography`); each fixation's training label is the known
+  on-screen dot position projected through that homography into scene-cam
+  pixels. Training in scene-cam space is what makes the fit head-invariant.
+- `screen_pixel_for_scene_gaze` is stubbed for future inference-time
+  screen-pixel mapping.
 
 A hand-rolled reference port lives in `eyetracker_pupil.py`, along with
 `docs/pupil_detector_port_notes.md` — that file is for future port work
@@ -61,13 +62,6 @@ CALIB_SCENE_STD_THRESH = 3.0
 CALIB_WARMUP = 5
 _calib_warmup_remaining = 0
 
-RED_DOT_HSV_LOW_1 = (0, 80, 60)
-RED_DOT_HSV_HIGH_1 = (12, 255, 255)
-RED_DOT_HSV_LOW_2 = (168, 80, 60)
-RED_DOT_HSV_HIGH_2 = (179, 255, 255)
-RED_DOT_MIN_AREA = 5
-RED_DOT_MAX_AREA = 10000
-
 poly_coeffs_x = None
 poly_coeffs_y = None
 
@@ -112,11 +106,10 @@ calib_tk_canvas = None
 _tk_key_queue = []
 
 last_eye_frame = None
-_last_red_dot_reason = "no frame yet"
-_last_red_dot_ok = False
-_last_red_dot_log_ts = 0.0
 last_scene_frame = None
 _last_no_scene_log_ts = 0.0
+_last_aruco_log_ts = 0.0
+_last_aruco_marker_count = 0
 
 ARUCO_DICT_NAME = "DICT_4X4_50"
 ARUCO_MARKER_PX = 80
@@ -151,95 +144,6 @@ def crop_to_aspect_ratio(image, width=640, height=480):
         cropped_img = image[offset:offset + new_height, :]
 
     return cv2.resize(cropped_img, (width, height))
-
-
-def _compute_red_dot(scene_bgr):
-    """Internal red-dot detection returning mask + candidates + reason.
-    Kept separate so the debug overlay can show why detection failed.
-    Also caches the latest status in module state for UI display."""
-    global _last_red_dot_reason, _last_red_dot_ok
-    hsv = cv2.cvtColor(scene_bgr, cv2.COLOR_BGR2HSV)
-    mask1 = cv2.inRange(hsv, RED_DOT_HSV_LOW_1, RED_DOT_HSV_HIGH_1)
-    mask2 = cv2.inRange(hsv, RED_DOT_HSV_LOW_2, RED_DOT_HSV_HIGH_2)
-    mask = cv2.bitwise_or(mask1, mask2)
-
-    mask_before_morph = int(np.count_nonzero(mask))
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask_after_morph = int(np.count_nonzero(mask))
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    all_areas = [cv2.contourArea(c) for c in contours]
-    candidates = [(c, a) for c, a in zip(contours, all_areas)
-                  if RED_DOT_MIN_AREA <= a <= RED_DOT_MAX_AREA]
-
-    center = None
-    if len(candidates) == 0:
-        top_areas = sorted(all_areas, reverse=True)[:3]
-        h = hsv[:, :, 0]
-        s = hsv[:, :, 1]
-        v = hsv[:, :, 2]
-        hue_in_red = ((h <= 10) | (h >= 170))
-        n_red_hue = int(hue_in_red.sum())
-        max_s_in_red = int(s[hue_in_red].max()) if n_red_hue > 0 else 0
-        max_v_in_red = int(v[hue_in_red].max()) if n_red_hue > 0 else 0
-        reason = (f"no candidates ({len(contours)} contours, top areas: {[int(a) for a in top_areas]}; "
-                  f"mask px pre/post-morph={mask_before_morph}/{mask_after_morph}; "
-                  f"red-hue px={n_red_hue}, max S/V in red-hue={max_s_in_red}/{max_v_in_red})")
-    elif len(candidates) > 1:
-        reason = f"{len(candidates)} candidates (ambiguous)"
-    else:
-        m = cv2.moments(candidates[0][0])
-        if m["m00"] == 0:
-            reason = "zero moment"
-        else:
-            cx = m["m10"] / m["m00"]
-            cy = m["m01"] / m["m00"]
-            center = (int(cx), int(cy))
-            reason = "ok"
-
-    _last_red_dot_reason = reason
-    _last_red_dot_ok = center is not None
-    return mask, candidates, center, reason
-
-
-def detect_red_dot(scene_bgr):
-    """Find the calibration dot in the scene-camera frame.
-
-    Returns (cx, cy) in scene-cam pixels, or None if not found / ambiguous.
-    """
-    _, _, center, _ = _compute_red_dot(scene_bgr)
-    return center
-
-
-def render_scene_debug(scene_bgr):
-    """Show the scene frame with red-mask tint + candidate contours + status."""
-    mask, candidates, center, reason = _compute_red_dot(scene_bgr)
-
-    overlay = scene_bgr.copy()
-    red_tint = overlay.copy()
-    red_tint[mask > 0] = (0, 0, 255)
-    overlay = cv2.addWeighted(overlay, 0.5, red_tint, 0.5, 0)
-
-    for c, a in candidates:
-        cv2.drawContours(overlay, [c], -1, (0, 255, 255), 1)
-        M = cv2.moments(c)
-        if M["m00"] > 0:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-            cv2.putText(overlay, f"a={int(a)}", (cx + 6, cy),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-
-    if center is not None:
-        cv2.circle(overlay, center, 8, (0, 255, 0), 2)
-
-    status = f"red-dot: {reason}"
-    cv2.putText(overlay, status, (10, 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-    cv2.putText(overlay, status, (10, 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if center else (0, 200, 255), 1)
-
-    cv2.imshow("Scene Debug", overlay)
 
 
 def _get_aruco_dict():
@@ -283,6 +187,19 @@ def _detect_aruco_markers(scene_bgr):
         params = cv2.aruco.DetectorParameters()
     corners, ids, _ = cv2.aruco.detectMarkers(scene_bgr, dictionary, parameters=params)
     return corners, ids
+
+
+def _update_aruco_count(scene_bgr):
+    global _last_aruco_marker_count
+    if scene_bgr is None:
+        _last_aruco_marker_count = 0
+        return
+    _, ids = _detect_aruco_markers(scene_bgr)
+    if ids is None:
+        _last_aruco_marker_count = 0
+        return
+    found = {int(i) for i in ids.flatten()} & set(ARUCO_IDS)
+    _last_aruco_marker_count = len(found)
 
 
 def _aruco_screen_centers():
@@ -758,7 +675,7 @@ def start_calibration():
         csv.writer(f).writerow([
             "image_path", "fixation_id", "x_screen", "y_screen",
             "pupil_x", "pupil_y", "confidence", "timestamp",
-            "scene_dot_x", "scene_dot_y",
+            "scene_target_x", "scene_target_y",
         ])
 
     print(f"Calibration started ({calib_total_points} points) on {screen_width}x{screen_height} screen.")
@@ -805,13 +722,13 @@ def render_calibration_overlay():
         status += f" - collecting [{len(calib_collect_frames)}/{CALIB_SAMPLES}]"
     else:
         status += " - press 'c' to capture, 's' to skip, 'q' to quit"
-    calib_tk_canvas.create_text(40, 40, text=status, fill="white",
+    calib_tk_canvas.create_text(120, 120, text=status, fill="white",
                                 anchor="nw", font=("Courier", 20))
 
-    dot_color = "#00ff00" if _last_red_dot_ok else "#ff6060"
-    calib_tk_canvas.create_text(40, screen_height - 40,
-                                text=f"red-dot: {_last_red_dot_reason}",
-                                fill=dot_color, anchor="sw",
+    aruco_color = "#00ff00" if _last_aruco_marker_count == 4 else "#ff6060"
+    calib_tk_canvas.create_text(120, screen_height - 120,
+                                text=f"aruco: {_last_aruco_marker_count}/4 markers visible",
+                                fill=aruco_color, anchor="sw",
                                 font=("Courier", 16))
 
 
@@ -868,7 +785,7 @@ def tick_capture():
     global calib_collecting, calib_collect_frames, calib_collect_scene
     global calib_state, calibrated
     global calib_pending_rows, calib_pending_image_paths
-    global _calib_warmup_remaining, _last_no_scene_log_ts
+    global _calib_warmup_remaining, _last_no_scene_log_ts, _last_aruco_log_ts
     if not calib_collecting:
         return False
     if last_pupil_center is None or last_eye_frame is None:
@@ -884,17 +801,26 @@ def tick_capture():
             _last_no_scene_log_ts = now
         return False
 
-    dot = detect_red_dot(last_scene_frame)
-    if dot is None:
-        global _last_red_dot_log_ts
+    H, _ = detect_aruco_homography(last_scene_frame)
+    if H is None:
         now = time.time()
-        if now - _last_red_dot_log_ts >= 1.0:
-            print(f"  [red-dot] {_last_red_dot_reason}")
-            _last_red_dot_log_ts = now
+        if now - _last_aruco_log_ts >= 1.0:
+            print("  [aruco] not all 4 markers visible")
+            _last_aruco_log_ts = now
         return False
-    sx, sy = dot
 
     fixation_idx = calib_state - 1
+    tx, ty = calib_points_screen[fixation_idx]
+    proj = H @ np.array([tx, ty, 1.0], dtype=float)
+    if abs(proj[2]) < 1e-9:
+        now = time.time()
+        if now - _last_aruco_log_ts >= 1.0:
+            print("  [aruco] degenerate homography projection")
+            _last_aruco_log_ts = now
+        return False
+    target_u = float(proj[0] / proj[2])
+    target_v = float(proj[1] / proj[2])
+
     sample_idx = len(calib_collect_frames)
     img_name = f"fix{fixation_idx:02d}_sample{sample_idx:02d}.png"
     img_path = os.path.join(calib_session_dir, img_name)
@@ -903,19 +829,18 @@ def tick_capture():
     scene_img_path = os.path.join(calib_session_dir, scene_img_name)
     cv2.imwrite(scene_img_path, last_scene_frame)
 
-    target = calib_points_screen[fixation_idx]
     px = float(last_pupil_center[0])
     py = float(last_pupil_center[1])
     calib_pending_rows.append([
-        img_name, fixation_idx, target[0], target[1],
+        img_name, fixation_idx, tx, ty,
         f"{px:.3f}", f"{py:.3f}", f"{last_confidence:.4f}", f"{time.time():.3f}",
-        sx, sy,
+        f"{target_u:.3f}", f"{target_v:.3f}",
     ])
     calib_pending_image_paths.append(img_path)
     calib_pending_image_paths.append(scene_img_path)
 
     calib_collect_frames.append(last_pupil_center.copy())
-    calib_collect_scene.append(np.array([sx, sy], dtype=float))
+    calib_collect_scene.append(np.array([target_u, target_v], dtype=float))
     if len(calib_collect_frames) < CALIB_SAMPLES:
         return False
 
@@ -947,8 +872,8 @@ def tick_capture():
     scene_inliers = scene_samples[keep_idx]
     scene_max_std = float(np.max(np.std(scene_inliers, axis=0)))
     if scene_max_std > CALIB_SCENE_STD_THRESH:
-        print(f"  High scene-dot variance (std={scene_max_std:.2f}px). "
-              f"Retrying — hold still and press 'c'.")
+        print(f"  High label variance (std={scene_max_std:.2f}px). "
+              f"Head may have moved. Retrying — hold still and press 'c'.")
         for p in calib_pending_image_paths:
             try:
                 os.remove(p)
@@ -967,20 +892,19 @@ def tick_capture():
     calib_points_scene.append(scene_median)
 
     try:
-        H, reproj_err = detect_aruco_homography(last_scene_frame)
+        H_chk, reproj_err = detect_aruco_homography(last_scene_frame)
     except Exception as e:
-        H, reproj_err = None, None
+        H_chk, reproj_err = None, None
         print(f"  ArUco detection error for fixation {fixation_idx}: {e}")
-    if H is not None:
-        tx, ty = calib_points_screen[fixation_idx]
+    if H_chk is not None:
         v = np.array([tx, ty, 1.0], dtype=float)
-        proj = H @ v
-        if abs(proj[2]) > 1e-9:
-            u = float(proj[0] / proj[2])
-            vp = float(proj[1] / proj[2])
+        proj_chk = H_chk @ v
+        if abs(proj_chk[2]) > 1e-9:
+            u = float(proj_chk[0] / proj_chk[2])
+            vp = float(proj_chk[1] / proj_chk[2])
             err = math.sqrt((u - scene_median[0])**2 + (vp - scene_median[1])**2)
             print(f"  ArUco check: fixation {fixation_idx} predicted ({u:.1f},{vp:.1f}) "
-                  f"vs detected ({scene_median[0]:.1f},{scene_median[1]:.1f}), "
+                  f"vs label-median ({scene_median[0]:.1f},{scene_median[1]:.1f}), "
                   f"err={err:.1f}px (reproj={reproj_err:.1f}px)")
     else:
         print(f"  ArUco: not all 4 markers visible for fixation {fixation_idx}")
@@ -1008,151 +932,6 @@ def tick_capture():
         calib_state += 1
         print(f"  Captured {len(calib_vectors_eye)}/{calib_total_points}. Look at next dot, press 'c'.")
     return True
-
-
-def run_threshold_tuner(external_cap):
-    """Interactive HSV + morph + area tuner. Opens a fullscreen tk window with
-    a single red dot at its center (same size as a calibration dot) so the
-    scene cam sees exactly what it will see during calibration, plus an
-    OpenCV window with trackbars. Press 'q' in either window to exit.
-    On exit, the chosen values are applied in-memory and printed for paste."""
-    global RED_DOT_HSV_LOW_1, RED_DOT_HSV_HIGH_1
-    global RED_DOT_HSV_LOW_2, RED_DOT_HSV_HIGH_2
-    global RED_DOT_MIN_AREA, RED_DOT_MAX_AREA
-
-    root = tk.Tk()
-    root.configure(bg="black")
-    root.update_idletasks()
-    screen_w = root.winfo_screenwidth()
-    screen_h = root.winfo_screenheight()
-    tuner_strip_h = 360
-    tk_h = screen_h - tuner_strip_h
-    root.geometry(f"{screen_w}x{tk_h}+0+0")
-    root.overrideredirect(True)
-    root.config(cursor="none")
-    canvas = tk.Canvas(root, width=screen_w, height=tk_h,
-                       bg="black", highlightthickness=0)
-    canvas.pack(fill="both", expand=True)
-    r = 20
-    canvas.create_oval(screen_w // 2 - r, tk_h // 2 - r,
-                       screen_w // 2 + r, tk_h // 2 + r,
-                       fill="red", outline="")
-    canvas.create_text(40, 40,
-                       text="Threshold Tuner — press 'q' in OpenCV window to exit",
-                       fill="white", anchor="nw", font=("Courier", 16))
-    quit_flag = [False]
-    root.bind("<KeyPress-q>", lambda _: quit_flag.__setitem__(0, True))
-    root.focus_force()
-    root.update()
-
-    win = "Threshold Tuner"
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(win, screen_w, tuner_strip_h)
-    cv2.moveWindow(win, 0, tk_h)
-    try:
-        cv2.setWindowProperty(win, cv2.WND_PROP_TOPMOST, 1)
-    except cv2.error:
-        pass
-    noop = lambda _: None
-    cv2.createTrackbar("H1 low", win, RED_DOT_HSV_LOW_1[0], 179, noop)
-    cv2.createTrackbar("H1 high", win, RED_DOT_HSV_HIGH_1[0], 179, noop)
-    cv2.createTrackbar("H2 low", win, RED_DOT_HSV_LOW_2[0], 179, noop)
-    cv2.createTrackbar("H2 high", win, RED_DOT_HSV_HIGH_2[0], 179, noop)
-    cv2.createTrackbar("S min", win, RED_DOT_HSV_LOW_1[1], 255, noop)
-    cv2.createTrackbar("V min", win, RED_DOT_HSV_LOW_1[2], 255, noop)
-    cv2.createTrackbar("Morph", win, 3, 15, noop)
-    cv2.createTrackbar("Min area", win, RED_DOT_MIN_AREA, 500, noop)
-    cv2.createTrackbar("Max area x100", win, RED_DOT_MAX_AREA // 100, 500, noop)
-
-    h1l = h1h = h2l = h2h = s_min = v_min = 0
-    morph = 0
-    min_area = max_area = 0
-    while not quit_flag[0]:
-        ret, frame = external_cap.read()
-        if not ret:
-            continue
-        frame = cv2.resize(frame, (EXT_WIDTH, EXT_HEIGHT))
-
-        h1l = cv2.getTrackbarPos("H1 low", win)
-        h1h = cv2.getTrackbarPos("H1 high", win)
-        h2l = cv2.getTrackbarPos("H2 low", win)
-        h2h = cv2.getTrackbarPos("H2 high", win)
-        s_min = cv2.getTrackbarPos("S min", win)
-        v_min = cv2.getTrackbarPos("V min", win)
-        morph = cv2.getTrackbarPos("Morph", win)
-        min_area = cv2.getTrackbarPos("Min area", win)
-        max_area = cv2.getTrackbarPos("Max area x100", win) * 100
-
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        m1 = cv2.inRange(hsv, (h1l, s_min, v_min), (h1h, 255, 255))
-        m2 = cv2.inRange(hsv, (h2l, s_min, v_min), (h2h, 255, 255))
-        mask = cv2.bitwise_or(m1, m2)
-        if morph > 0:
-            k = np.ones((morph, morph), np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        candidates = [(c, cv2.contourArea(c)) for c in contours]
-        candidates = [(c, a) for c, a in candidates if min_area <= a <= max_area]
-
-        overlay = frame.copy()
-        red_tint = overlay.copy()
-        red_tint[mask > 0] = (0, 0, 255)
-        overlay = cv2.addWeighted(overlay, 0.5, red_tint, 0.5, 0)
-
-        for c, a in candidates:
-            cv2.drawContours(overlay, [c], -1, (0, 255, 255), 1)
-            M = cv2.moments(c)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                cv2.putText(overlay, f"a={int(a)}", (cx + 6, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-
-        if len(candidates) == 1:
-            M = cv2.moments(candidates[0][0])
-            if M["m00"] > 0:
-                cv2.circle(overlay,
-                           (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])),
-                           8, (0, 255, 0), 2)
-
-        mask_px = int(np.count_nonzero(mask))
-        status = f"{len(candidates)} candidates  |  mask px={mask_px}"
-        cv2.putText(overlay, status, (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-        cv2.putText(overlay, status, (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (0, 255, 0) if len(candidates) == 1 else (0, 200, 255), 1)
-
-        cv2.imshow(win, overlay)
-        try:
-            root.update()
-        except tk.TclError:
-            break
-        if (cv2.waitKey(1) & 0xFF) == ord('q'):
-            break
-
-    RED_DOT_HSV_LOW_1 = (h1l, s_min, v_min)
-    RED_DOT_HSV_HIGH_1 = (h1h, 255, 255)
-    RED_DOT_HSV_LOW_2 = (h2l, s_min, v_min)
-    RED_DOT_HSV_HIGH_2 = (h2h, 255, 255)
-    RED_DOT_MIN_AREA = min_area
-    RED_DOT_MAX_AREA = max_area
-
-    print("\n=== Threshold Tuner — final values (applied live; paste into source to persist) ===")
-    print(f"RED_DOT_HSV_LOW_1  = {RED_DOT_HSV_LOW_1}")
-    print(f"RED_DOT_HSV_HIGH_1 = {RED_DOT_HSV_HIGH_1}")
-    print(f"RED_DOT_HSV_LOW_2  = {RED_DOT_HSV_LOW_2}")
-    print(f"RED_DOT_HSV_HIGH_2 = {RED_DOT_HSV_HIGH_2}")
-    print(f"RED_DOT_MIN_AREA   = {RED_DOT_MIN_AREA}")
-    print(f"RED_DOT_MAX_AREA   = {RED_DOT_MAX_AREA}")
-    print(f"(morph kernel size explored: {morph} — currently hardcoded to 3x3 in _compute_red_dot)\n")
-
-    try:
-        root.destroy()
-    except tk.TclError:
-        pass
-    cv2.destroyWindow(win)
 
 
 def _teardown_calibration_overlay():
@@ -1205,10 +984,8 @@ def process_camera():
     if external_cap is not None:
         cv2.namedWindow("External Camera (Gaze)")
         cv2.moveWindow("External Camera (Gaze)", 720, 50)
-        cv2.namedWindow("Scene Debug")
-        cv2.moveWindow("Scene Debug", 720, 560)
 
-    print("Controls: 'c' = calibrate, 'l' = load calibration, 't' = tune red-dot thresholds, 'q' = quit, space = pause")
+    print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
 
     while True:
         ret_eye, eye_frame = eye_cap.read()
@@ -1226,13 +1003,13 @@ def process_camera():
             if ret_ext:
                 ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
                 last_scene_frame = ext_frame_resized.copy()
+                _update_aruco_count(last_scene_frame)
 
                 if calibrated and calib_state == 0:
                     update_gaze_circle_from_current_gaze()
                     cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
 
                 cv2.imshow("External Camera (Gaze)", ext_frame_resized)
-                render_scene_debug(last_scene_frame)
 
         if calib_state > 0 and calib_tk_root is not None:
             render_calibration_overlay()
@@ -1260,9 +1037,6 @@ def process_camera():
         elif key == 's':
             if calib_state > 0:
                 skip_current_point()
-        elif key == 't':
-            if calib_state == 0 and external_cap is not None:
-                run_threshold_tuner(external_cap)
 
     _teardown_calibration_overlay()
     eye_cap.release()
