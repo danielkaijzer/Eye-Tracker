@@ -58,7 +58,7 @@ calib_points_scene = []
 CALIB_SAMPLES = 15
 CALIB_INLIERS = 10
 CALIB_STD_THRESH = 12.0
-CALIB_SCENE_STD_THRESH = 3.0
+CALIB_SCENE_STD_THRESH = 10.0
 CALIB_WARMUP = 5
 _calib_warmup_remaining = 0
 
@@ -85,13 +85,17 @@ PUPIL_JUMP_THRESH = 400.0
 
 calibrated = False
 
-EXT_WIDTH = 640
-EXT_HEIGHT = 480
-EXT_CX = EXT_WIDTH // 2
-EXT_CY = EXT_HEIGHT // 2
+DISPLAY_WIDTH = 640
+DISPLAY_HEIGHT = 480
 
-circle_x = EXT_CX
-circle_y = EXT_CY
+SCENE_REQUEST_WIDTH = 1920
+SCENE_REQUEST_HEIGHT = 1080
+
+scene_cam_width = None
+scene_cam_height = None
+
+circle_x = 0
+circle_y = 0
 
 screen_width = None
 screen_height = None
@@ -112,8 +116,8 @@ _last_aruco_log_ts = 0.0
 _last_aruco_marker_count = 0
 
 ARUCO_DICT_NAME = "DICT_4X4_50"
-ARUCO_MARKER_PX = 80
-ARUCO_QUIET_ZONE_PX = 100
+ARUCO_MARKER_PX = 160
+ARUCO_QUIET_ZONE_PX = 200
 ARUCO_IDS = (0, 1, 2, 3)
 _aruco_photo_images = []
 _aruco_detector = None
@@ -429,12 +433,15 @@ def process_frame(frame):
 def update_gaze_circle_from_current_gaze():
     """Map current pupil position to scene-camera coords via fitted polynomial.
 
-    Polynomial outputs gaze directly in scene-cam pixels (640x480); no rescale.
+    Polynomial outputs gaze directly in native scene-cam pixels; no rescale.
+    Drawing scales from scene-cam space to display space separately.
     """
     global circle_x, circle_y
     if not calibrated or last_pupil_center is None:
         return
     if poly_coeffs_x is None or poly_coeffs_y is None:
+        return
+    if scene_cam_width is None or scene_cam_height is None:
         return
 
     px, py = last_pupil_center[0], last_pupil_center[1]
@@ -447,8 +454,8 @@ def update_gaze_circle_from_current_gaze():
     avg_u = np.mean([p[0] for p in screen_buffer])
     avg_v = np.mean([p[1] for p in screen_buffer])
 
-    circle_x = int(np.clip(avg_u, 0, EXT_WIDTH - 1))
-    circle_y = int(np.clip(avg_v, 0, EXT_HEIGHT - 1))
+    circle_x = int(np.clip(avg_u, 0, scene_cam_width - 1))
+    circle_y = int(np.clip(avg_v, 0, scene_cam_height - 1))
 
 
 def _build_poly_features(gx, gy):
@@ -498,8 +505,9 @@ def compute_polynomial_calibration():
     skipped = len(calib_skipped_indices)
     print(f"Polynomial calibration fitted ({n} points, {skipped} skipped).")
     print(f"  LOO error: avg={avg_err:.1f}px, max={max_err:.1f}px")
-    if avg_err > 25:
-        print("  WARNING: High error — consider recalibrating.")
+    err_threshold = 0.04 * (scene_cam_width or 640)
+    if avg_err > err_threshold:
+        print(f"  WARNING: High error (>{err_threshold:.0f}px at this scene-cam resolution) — consider recalibrating.")
 
     _save_calibration()
     return True
@@ -531,8 +539,8 @@ def _save_calibration():
              scene_points=scene_points,
              screen_points=screen_points,
              coord_space="scene",
-             scene_width=EXT_WIDTH,
-             scene_height=EXT_HEIGHT,
+             scene_width=scene_cam_width,
+             scene_height=scene_cam_height,
              screen_width=screen_width,
              screen_height=screen_height,
              aruco_dict_id=aruco_dict_id,
@@ -569,6 +577,7 @@ def _save_calibration():
 def load_calibration():
     global poly_coeffs_x, poly_coeffs_y, calibrated
     global screen_width, screen_height
+    global scene_cam_width, scene_cam_height
     path = _calibration_path()
     if not os.path.exists(path):
         print("No saved calibration found.")
@@ -585,10 +594,10 @@ def load_calibration():
     if 'screen_height' in data.files:
         screen_height = int(data['screen_height'])
     if 'scene_width' in data.files:
-        scene_w = int(data['scene_width'])
-        scene_h = int(data['scene_height'])
-    else:
-        scene_w, scene_h = EXT_WIDTH, EXT_HEIGHT
+        scene_cam_width = int(data['scene_width'])
+        scene_cam_height = int(data['scene_height'])
+    scene_w = scene_cam_width
+    scene_h = scene_cam_height
     ts = float(data['timestamp'])
     age_hrs = (time.time() - ts) / 3600
     calibrated = True
@@ -656,8 +665,8 @@ def start_calibration():
     calib_tk_root.focus_force()
     calib_tk_root.update()
 
-    margin_x = 120
-    margin_y = 120
+    margin_x = 220
+    margin_y = 220
     cols, rows = 4, 3
     calib_points_screen = []
     for r in range(rows):
@@ -722,13 +731,13 @@ def render_calibration_overlay():
         status += f" - collecting [{len(calib_collect_frames)}/{CALIB_SAMPLES}]"
     else:
         status += " - press 'c' to capture, 's' to skip, 'q' to quit"
-    calib_tk_canvas.create_text(120, 120, text=status, fill="white",
-                                anchor="nw", font=("Courier", 20))
+    calib_tk_canvas.create_text(screen_width // 2, 40, text=status, fill="white",
+                                anchor="n", font=("Courier", 20))
 
     aruco_color = "#00ff00" if _last_aruco_marker_count == 4 else "#ff6060"
-    calib_tk_canvas.create_text(120, screen_height - 120,
+    calib_tk_canvas.create_text(screen_width // 2, screen_height - 40,
                                 text=f"aruco: {_last_aruco_marker_count}/4 markers visible",
-                                fill=aruco_color, anchor="sw",
+                                fill=aruco_color, anchor="s",
                                 font=("Courier", 16))
 
 
@@ -947,6 +956,7 @@ def _teardown_calibration_overlay():
 
 def process_camera():
     global selected_camera, circle_x, circle_y, calibrated, last_scene_frame
+    global scene_cam_width, scene_cam_height
 
     try:
         cam_index = int(selected_camera.get())
@@ -970,12 +980,17 @@ def process_camera():
     external_cap = cv2.VideoCapture(external_index)
 
     if external_cap.isOpened():
-        external_cap.set(cv2.CAP_PROP_FRAME_WIDTH, EXT_WIDTH)
-        external_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, EXT_HEIGHT)
+        external_cap.set(cv2.CAP_PROP_FRAME_WIDTH, SCENE_REQUEST_WIDTH)
+        external_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, SCENE_REQUEST_HEIGHT)
+        scene_cam_width = int(external_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        scene_cam_height = int(external_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"Scene cam: requested {SCENE_REQUEST_WIDTH}x{SCENE_REQUEST_HEIGHT}, "
+              f"got {scene_cam_width}x{scene_cam_height}")
     else:
         external_cap = None
 
-    circle_x, circle_y = EXT_CX, EXT_CY
+    circle_x = (scene_cam_width or DISPLAY_WIDTH) // 2
+    circle_y = (scene_cam_height or DISPLAY_HEIGHT) // 2
     calibrated = False
 
     cv2.namedWindow("Eye Camera")
@@ -1001,13 +1016,15 @@ def process_camera():
         if external_cap is not None:
             ret_ext, ext_frame = external_cap.read()
             if ret_ext:
-                ext_frame_resized = cv2.resize(ext_frame, (EXT_WIDTH, EXT_HEIGHT))
-                last_scene_frame = ext_frame_resized.copy()
+                last_scene_frame = ext_frame.copy()
                 _update_aruco_count(last_scene_frame)
+                ext_frame_resized = cv2.resize(ext_frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
 
                 if calibrated and calib_state == 0:
                     update_gaze_circle_from_current_gaze()
-                    cv2.circle(ext_frame_resized, (circle_x, circle_y), 8, (0, 255, 0), -1)
+                    disp_x = int(circle_x * DISPLAY_WIDTH / (scene_cam_width or DISPLAY_WIDTH))
+                    disp_y = int(circle_y * DISPLAY_HEIGHT / (scene_cam_height or DISPLAY_HEIGHT))
+                    cv2.circle(ext_frame_resized, (disp_x, disp_y), 8, (0, 255, 0), -1)
 
                 cv2.imshow("External Camera (Gaze)", ext_frame_resized)
 
