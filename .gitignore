@@ -12,6 +12,7 @@ Scripts/__pycache__
 .et/
 
 # dependencies (no leading / — ignore in subfolders e.g. frontend/node_modules)
+eigen-3.3.7/
 node_modules/
 /.pnp
 .pnp.*
