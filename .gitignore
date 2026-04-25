@@ -2,6 +2,7 @@
 gaze_vector.txt
 data/
 GEMINI.md
+.docs/
 
 # Cache stuff
 .vscode
