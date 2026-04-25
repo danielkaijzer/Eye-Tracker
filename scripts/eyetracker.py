@@ -2,7 +2,11 @@
 
 Pipeline:
 - Pupil Labs `pupil_detectors.Detector2D` (dark-pupil, 2014 paper) finds the
-  pupil center in the eye-cam frame.
+  pupil center in the eye-cam frame, then `pye3d.Detector3D` refines that
+  center using a persistent 3D eye-sphere model. First ~30-60s of use build
+  the model; after that the 2D pupil output is temporally smoothed and
+  robust to blinks/eyelid occlusion. Press 'r' to reset the model if the
+  headset is re-seated mid-session.
 - A 2nd-degree bivariate polynomial maps pupil pixel directly to scene-cam
   pixel. No screen-pixel rescale at inference time — the mapping is
   head-pose invariant for the gaze-on-scene use case.
@@ -70,7 +74,24 @@ HIGH_FPS_MODE = False
 last_pupil_center = None
 last_confidence = 0.0
 
-_pupil_detector_lib = None
+_pupil_detector_2d = None
+_pupil_detector_3d = None
+_pupil_camera = None
+
+# Eye cam: 0.3 MP (640x480) with 80° lens. If the spec turns out to be
+# diagonal FOV rather than horizontal, set EYE_CAM_FOV_IS_DIAGONAL = True.
+EYE_CAM_RESOLUTION = (640, 480)
+EYE_CAM_FOV_DEG = 80.0
+EYE_CAM_FOV_IS_DIAGONAL = True
+
+
+def _compute_eye_focal_length_px():
+    w, h = EYE_CAM_RESOLUTION
+    ref = math.sqrt(w * w + h * h) if EYE_CAM_FOV_IS_DIAGONAL else w
+    return (ref / 2.0) / math.tan(math.radians(EYE_CAM_FOV_DEG / 2.0))
+
+
+EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
 
 # Library confidence = min(0.99, support/circ) * (support/total_edges)^2.
 # Clean pupils typically score > 0.8; 0.25 is permissive.
@@ -336,12 +357,26 @@ def screen_pixel_for_scene_gaze(scene_xy, scene_bgr):
     return (float(out[0] / out[2]), float(out[1] / out[2]))
 
 
-def _get_pupil_detector():
-    global _pupil_detector_lib
-    if _pupil_detector_lib is None:
+def _get_pupil_detectors():
+    """Lazy-init Detector2D + pye3d Detector3D sharing one CameraModel."""
+    global _pupil_detector_2d, _pupil_detector_3d, _pupil_camera
+    if _pupil_detector_3d is None:
         from pupil_detectors import Detector2D
-        _pupil_detector_lib = Detector2D()
-    return _pupil_detector_lib
+        from pye3d.detector_3d import CameraModel, Detector3D, DetectorMode
+        _pupil_camera = CameraModel(focal_length=EYE_CAM_FOCAL_LENGTH_PX,
+                                    resolution=(640, 480))
+        _pupil_detector_2d = Detector2D()
+        _pupil_detector_3d = Detector3D(camera=_pupil_camera,
+                                        long_term_mode=DetectorMode.blocking)
+    return _pupil_detector_2d, _pupil_detector_3d
+
+
+def reset_pye3d_model():
+    """Discard the 3D eye model so the next detect call re-initializes it.
+    Use after re-seating the headset."""
+    global _pupil_detector_3d
+    _pupil_detector_3d = None
+    print("Pupil 3D model reset — give it ~30s to reconverge.")
 
 
 def detect_pupil(gray_frame):
@@ -349,13 +384,17 @@ def detect_pupil(gray_frame):
 
     center: (int, int) for cv2.circle
     ellipse: ((cx, cy), (minor, major), angle_deg) for cv2.ellipse
-             (the library already shifts angle by -90° to OpenCV's convention)
+    The 2D ellipse output is from pye3d (Detector2D's ellipse refined by
+    the 3D model's constraint).
     """
-    result = _get_pupil_detector().detect(gray_frame)
-    conf = float(result["confidence"])
+    det2d, det3d = _get_pupil_detectors()
+    result_2d = det2d.detect(gray_frame)
+    result_2d["timestamp"] = time.perf_counter()
+    result_3d = det3d.update_and_detect(result_2d, gray_frame)
+    conf = float(result_3d["confidence"])
     if conf <= 0.0:
         return None, None, 0.0
-    ell = result["ellipse"]
+    ell = result_3d["ellipse"]
     cx, cy = ell["center"]
     center_int = (int(round(cx)), int(round(cy)))
     ellipse_tuple = ((cx, cy), ell["axes"], ell["angle"])
@@ -1000,7 +1039,7 @@ def process_camera():
         cv2.namedWindow("External Camera (Gaze)")
         cv2.moveWindow("External Camera (Gaze)", 720, 50)
 
-    print("Controls: 'c' = calibrate, 'l' = load calibration, 'q' = quit, space = pause")
+    print("Controls: 'c' = calibrate, 'l' = load calibration, 'r' = reset pupil 3D model, 'q' = quit, space = pause")
 
     while True:
         ret_eye, eye_frame = eye_cap.read()
@@ -1054,6 +1093,8 @@ def process_camera():
         elif key == 's':
             if calib_state > 0:
                 skip_current_point()
+        elif key == 'r':
+            reset_pye3d_model()
 
     _teardown_calibration_overlay()
     eye_cap.release()
