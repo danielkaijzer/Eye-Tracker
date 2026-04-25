@@ -36,7 +36,6 @@ and is not imported from here.
 #      exactly at training points and behaves more smoothly at edges.
 #   3. Weight edge/corner points higher in the least-squares fit.
 import base64
-import csv
 import cv2
 import math
 import numpy as np
@@ -75,8 +74,20 @@ from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamer
 from scripts.eyetracker.cameras.utils import crop_to_aspect_ratio
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
 from scripts.eyetracker.pupil.pupil_labs import PupilLabsDetector
+from scripts.eyetracker.calibration.persistence import (
+    CalibrationSnapshot,
+    append_label_rows,
+    begin_session,
+    load_calibration as _load_calibration,
+    save_calibration as _save_calibration_to_disk,
+)
+from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
+from scripts.eyetracker.gaze.smoothing import MovingAverageSmoother
+from scripts.eyetracker.scene.aruco_dict import generate_marker_png
+from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
-screen_buffer = deque(maxlen=BUFFER_SIZE)
+_gaze_mapper = PolynomialGazeMapper()
+_gaze_smoother = MovingAverageSmoother(window=BUFFER_SIZE)
 
 calib_points_screen = []
 calib_vectors_eye = []
@@ -89,9 +100,6 @@ calib_collect_frames = []
 calib_collect_scene = []
 calib_points_scene = []
 _calib_warmup_remaining = 0
-
-poly_coeffs_x = None
-poly_coeffs_y = None
 
 last_pupil_center = None
 last_confidence = 0.0
@@ -124,113 +132,22 @@ last_eye_frame = None
 last_scene_frame = None
 _last_no_scene_log_ts = 0.0
 _last_aruco_log_ts = 0.0
-_last_aruco_marker_count = 0
 
 _aruco_photo_images = []
-_aruco_detector = None
-
-
-def _get_aruco_dict():
-    if not hasattr(cv2, "aruco"):
-        raise ImportError(
-            "cv2.aruco is not available in this OpenCV build. "
-            "Install opencv-contrib-python to enable ArUco support."
-        )
-    return cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-
-
-def _get_aruco_detector():
-    global _aruco_detector
-    if _aruco_detector is not None:
-        return _aruco_detector
-    if not hasattr(cv2, "aruco"):
-        raise ImportError(
-            "cv2.aruco is not available in this OpenCV build. "
-            "Install opencv-contrib-python to enable ArUco support."
-        )
-    try:
-        dictionary = _get_aruco_dict()
-        params = cv2.aruco.DetectorParameters()
-        _aruco_detector = cv2.aruco.ArucoDetector(dictionary, params)
-    except AttributeError:
-        _aruco_detector = None
-    return _aruco_detector
-
-
-def _detect_aruco_markers(scene_bgr):
-    """Return (corners, ids) using the modern ArucoDetector if available,
-    else the legacy detectMarkers call. corners/ids follow the OpenCV shape."""
-    detector = _get_aruco_detector()
-    if detector is not None:
-        corners, ids, _ = detector.detectMarkers(scene_bgr)
-        return corners, ids
-    dictionary = _get_aruco_dict()
-    try:
-        params = cv2.aruco.DetectorParameters_create()
-    except AttributeError:
-        params = cv2.aruco.DetectorParameters()
-    corners, ids, _ = cv2.aruco.detectMarkers(scene_bgr, dictionary, parameters=params)
-    return corners, ids
-
-
-def _update_aruco_count(scene_bgr):
-    global _last_aruco_marker_count
-    if scene_bgr is None:
-        _last_aruco_marker_count = 0
-        return
-    _, ids = _detect_aruco_markers(scene_bgr)
-    if ids is None:
-        _last_aruco_marker_count = 0
-        return
-    found = {int(i) for i in ids.flatten()} & set(ARUCO_IDS)
-    _last_aruco_marker_count = len(found)
-
-
-def _aruco_screen_centers():
-    """Return dict {marker_id: (cx, cy)} of on-screen marker centers.
-    IDs: 0=TL, 1=TR, 2=BR, 3=BL. Quiet zone hugs the corner; marker is centered
-    inside the ARUCO_QUIET_ZONE_PX x ARUCO_QUIET_ZONE_PX white pad."""
-    if screen_width is None or screen_height is None:
-        return {}
-    q = ARUCO_QUIET_ZONE_PX
-    half = q / 2.0
-    positions = {
-        0: (half, half),
-        1: (screen_width - half, half),
-        2: (screen_width - half, screen_height - half),
-        3: (half, screen_height - half),
-    }
-    return positions
-
-
-def _aruco_quiet_zone_origins():
-    """Return dict {marker_id: (x_nw, y_nw)} of NW corners of the quiet-zone
-    rectangle (which hugs the screen corners)."""
-    if screen_width is None or screen_height is None:
-        return {}
-    q = ARUCO_QUIET_ZONE_PX
-    return {
-        0: (0, 0),
-        1: (screen_width - q, 0),
-        2: (screen_width - q, screen_height - q),
-        3: (0, screen_height - q),
-    }
+_aruco_mapper = ArucoHomography()
 
 
 def _ensure_aruco_photo_images():
     """Generate and cache the four marker images as tk.PhotoImage instances.
-    Must be called after a tk root exists."""
+    Must be called after a tk root exists. Stays here (not in scene/) because
+    tk.PhotoImage requires a live Tk root; will move into display/ at step 9."""
     global _aruco_photo_images
     if len(_aruco_photo_images) == 4:
         return _aruco_photo_images
-    dictionary = _get_aruco_dict()
     imgs = []
     for marker_id in ARUCO_IDS:
-        marker = cv2.aruco.generateImageMarker(dictionary, marker_id, ARUCO_MARKER_PX)
-        ok, buf = cv2.imencode(".png", marker)
-        if not ok:
-            raise RuntimeError(f"Failed to encode ArUco marker {marker_id} to PNG.")
-        b64 = base64.b64encode(buf.tobytes())
+        png_bytes = generate_marker_png(marker_id, ARUCO_MARKER_PX)
+        b64 = base64.b64encode(png_bytes)
         imgs.append(tk.PhotoImage(data=b64))
     _aruco_photo_images = imgs
     return _aruco_photo_images
@@ -240,80 +157,13 @@ def _draw_aruco_corners(canvas):
     if screen_width is None or screen_height is None:
         return
     photos = _ensure_aruco_photo_images()
-    origins = _aruco_quiet_zone_origins()
+    origins = _aruco_mapper.quiet_zone_origins()
     q = ARUCO_QUIET_ZONE_PX
     inset = (q - ARUCO_MARKER_PX) // 2
     for i, marker_id in enumerate(ARUCO_IDS):
         ox, oy = origins[marker_id]
         canvas.create_rectangle(ox, oy, ox + q, oy + q, fill="white", outline="")
         canvas.create_image(ox + inset, oy + inset, anchor="nw", image=photos[i])
-
-
-def detect_aruco_homography(scene_bgr):
-    """Detect the four corner ArUco markers in a scene-cam frame and compute
-    the screen -> scene-cam homography.
-
-    Returns (H, reprojection_error) where H is a 3x3 homography matrix mapping
-    (x_screen, y_screen, 1) -> (x_scene, y_scene, 1), or (None, None) if <4
-    markers were found or the homography degenerated.
-    """
-    if scene_bgr is None:
-        return None, None
-    corners, ids = _detect_aruco_markers(scene_bgr)
-    if ids is None or len(ids) < 4:
-        return None, None
-    id_to_center = {}
-    ids_flat = ids.flatten()
-    for c, mid in zip(corners, ids_flat):
-        mid = int(mid)
-        if mid not in ARUCO_IDS:
-            continue
-        pts = c.reshape(-1, 2)
-        id_to_center[mid] = pts.mean(axis=0)
-    if any(i not in id_to_center for i in ARUCO_IDS):
-        return None, None
-
-    screen_centers = _aruco_screen_centers()
-    if not screen_centers:
-        return None, None
-
-    screen_pts = np.array([screen_centers[i] for i in ARUCO_IDS], dtype=np.float32)
-    scene_pts = np.array([id_to_center[i] for i in ARUCO_IDS], dtype=np.float32)
-
-    H, _ = cv2.findHomography(screen_pts, scene_pts, method=0)
-    if H is None:
-        return None, None
-
-    homog = np.hstack([screen_pts, np.ones((4, 1), dtype=np.float32)])
-    projected = (H @ homog.T).T
-    ws = projected[:, 2:3]
-    if np.any(np.abs(ws) < 1e-9):
-        return None, None
-    projected_xy = projected[:, :2] / ws
-    errs = np.linalg.norm(projected_xy - scene_pts, axis=1)
-    reproj_err = float(np.mean(errs))
-    return H, reproj_err
-
-
-# Unused in the runtime loop; wired in once inference-time screen mapping is needed.
-def screen_pixel_for_scene_gaze(scene_xy, scene_bgr):
-    """If ArUco markers are visible in scene_bgr, map a predicted scene-cam
-    gaze point back to screen pixels via inverse homography.
-
-    Returns (x_screen, y_screen) or None.
-    """
-    H, _ = detect_aruco_homography(scene_bgr)
-    if H is None:
-        return None
-    try:
-        H_inv = np.linalg.inv(H)
-    except np.linalg.LinAlgError:
-        return None
-    v = np.array([scene_xy[0], scene_xy[1], 1.0], dtype=float)
-    out = H_inv @ v
-    if abs(out[2]) < 1e-9:
-        return None
-    return (float(out[0] / out[2]), float(out[1] / out[2]))
 
 
 def reset_pye3d_model():
@@ -381,179 +231,75 @@ def update_gaze_circle_from_current_gaze():
     global circle_x, circle_y
     if not calibrated or last_pupil_center is None:
         return
-    if poly_coeffs_x is None or poly_coeffs_y is None:
+    if not _gaze_mapper.is_fitted():
         return
     if scene_cam_width is None or scene_cam_height is None:
         return
 
-    px, py = last_pupil_center[0], last_pupil_center[1]
-    feat = _build_poly_features(px, py)
-
-    u_scene = feat @ poly_coeffs_x
-    v_scene = feat @ poly_coeffs_y
-
-    screen_buffer.append((u_scene, v_scene))
-    avg_u = np.mean([p[0] for p in screen_buffer])
-    avg_v = np.mean([p[1] for p in screen_buffer])
+    pred = _gaze_mapper.predict((last_pupil_center[0], last_pupil_center[1]))
+    avg_u, avg_v = _gaze_smoother.add(pred)
 
     circle_x = int(np.clip(avg_u, 0, scene_cam_width - 1))
     circle_y = int(np.clip(avg_v, 0, scene_cam_height - 1))
 
 
-def _build_poly_features(gx, gy):
-    """2nd-degree polynomial feature row: [1, gx, gy, gx^2, gy^2, gx*gy]"""
-    return np.array([1.0, gx, gy, gx*gx, gy*gy, gx*gy])
-
-
 def compute_polynomial_calibration():
     """Fit 2nd-degree polynomial from pupil positions to scene-cam coords."""
-    global poly_coeffs_x, poly_coeffs_y
     n = len(calib_vectors_eye)
-    if n < 6:
-        print(f"Need at least 6 calibration points, have {n}.")
-        return False
     if len(calib_points_scene) != n:
         print(f"  ERROR: calib_points_scene ({len(calib_points_scene)}) and "
               f"calib_vectors_eye ({n}) length mismatch. Aborting fit.")
         return False
 
-    A = np.zeros((n, 6))
-    bx = np.zeros(n)
-    by = np.zeros(n)
-    for i, (v, pt) in enumerate(zip(calib_vectors_eye, calib_points_scene)):
-        A[i] = _build_poly_features(v[0], v[1])
-        bx[i] = pt[0]
-        by[i] = pt[1]
+    try:
+        report = _gaze_mapper.fit(np.array(calib_vectors_eye),
+                                  np.array(calib_points_scene))
+    except ValueError as e:
+        print(str(e))
+        return False
 
-    cx, _, _, _ = np.linalg.lstsq(A, bx, rcond=None)
-    cy, _, _, _ = np.linalg.lstsq(A, by, rcond=None)
-    poly_coeffs_x = cx
-    poly_coeffs_y = cy
-
-    errors = []
-    for i in range(n):
-        A_loo = np.delete(A, i, axis=0)
-        bx_loo = np.delete(bx, i)
-        by_loo = np.delete(by, i)
-        cx_loo, _, _, _ = np.linalg.lstsq(A_loo, bx_loo, rcond=None)
-        cy_loo, _, _, _ = np.linalg.lstsq(A_loo, by_loo, rcond=None)
-        pred_x = A[i] @ cx_loo
-        pred_y = A[i] @ cy_loo
-        err = math.sqrt((pred_x - bx[i])**2 + (pred_y - by[i])**2)
-        errors.append(err)
-
-    avg_err = np.mean(errors)
-    max_err = np.max(errors)
     skipped = len(calib_skipped_indices)
-    print(f"Polynomial calibration fitted ({n} points, {skipped} skipped).")
-    print(f"  LOO error: avg={avg_err:.1f}px, max={max_err:.1f}px")
+    print(f"Polynomial calibration fitted ({report.n_points} points, {skipped} skipped).")
+    print(f"  LOO error: avg={report.loo_avg_err:.1f}px, max={report.loo_max_err:.1f}px")
     err_threshold = 0.04 * (scene_cam_width or 640)
-    if avg_err > err_threshold:
+    if report.loo_avg_err > err_threshold:
         print(f"  WARNING: High error (>{err_threshold:.0f}px at this scene-cam resolution) — consider recalibrating.")
 
     _save_calibration()
     return True
 
 
-def _calibration_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_pupil.npz")
-
-
-def _history_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_pupil_history.npz")
-
-
 def _save_calibration():
-    global poly_coeffs_x, poly_coeffs_y
-    path = _calibration_path()
-    vectors = np.array(calib_vectors_eye)
-    scene_points = np.array(calib_points_scene)
-    screen_points = np.array(calib_points_screen)
-    aruco_centers_map = _aruco_screen_centers()
+    aruco_centers_map = _aruco_mapper.screen_anchor_points()
     aruco_screen_centers = np.array(
         [aruco_centers_map[i] for i in ARUCO_IDS], dtype=float
     ) if aruco_centers_map else np.zeros((0, 2), dtype=float)
-    aruco_dict_id = int(cv2.aruco.DICT_4X4_50) if hasattr(cv2, "aruco") else -1
-    np.savez(path,
-             poly_coeffs_x=poly_coeffs_x,
-             poly_coeffs_y=poly_coeffs_y,
-             vectors=vectors,
-             scene_points=scene_points,
-             screen_points=screen_points,
-             coord_space="scene",
-             scene_width=scene_cam_width,
-             scene_height=scene_cam_height,
-             screen_width=screen_width,
-             screen_height=screen_height,
-             aruco_dict_id=aruco_dict_id,
-             aruco_dict_name=ARUCO_DICT_NAME,
-             aruco_marker_px=ARUCO_MARKER_PX,
-             aruco_quiet_zone_px=ARUCO_QUIET_ZONE_PX,
-             aruco_screen_centers=aruco_screen_centers,
-             timestamp=time.time())
-    print(f"  Calibration saved to {path}")
-
-    hist_path = _history_path()
-    # Old history files use `all_points` (screen-space); treat any file without
-    # `all_scene_points` as fresh so we don't mix coord spaces.
-    if os.path.exists(hist_path):
-        old = np.load(hist_path, allow_pickle=True)
-        if 'all_scene_points' in old.files:
-            old_vectors = list(old['all_vectors'])
-            old_scene_points = list(old['all_scene_points'])
-        else:
-            old_vectors = []
-            old_scene_points = []
-    else:
-        old_vectors = []
-        old_scene_points = []
-    old_vectors.append(vectors)
-    old_scene_points.append(scene_points)
-    np.savez(hist_path,
-             all_vectors=np.array(old_vectors, dtype=object),
-             all_scene_points=np.array(old_scene_points, dtype=object))
-    total_pts = sum(len(v) for v in old_vectors)
-    print(f"  History: {len(old_vectors)} sessions, {total_pts} total points.")
+    snapshot = CalibrationSnapshot(
+        pupil_vectors=np.array(calib_vectors_eye),
+        scene_points=np.array(calib_points_scene),
+        screen_points=np.array(calib_points_screen),
+        aruco_screen_centers=aruco_screen_centers,
+        scene_size=(scene_cam_width, scene_cam_height)
+            if scene_cam_width is not None and scene_cam_height is not None else None,
+        screen_size=(screen_width, screen_height)
+            if screen_width is not None and screen_height is not None else None,
+    )
+    _save_calibration_to_disk(snapshot, _gaze_mapper)
 
 
 def load_calibration():
-    global poly_coeffs_x, poly_coeffs_y, calibrated
+    global calibrated
     global screen_width, screen_height
     global scene_cam_width, scene_cam_height
-    path = _calibration_path()
-    if not os.path.exists(path):
-        print("No saved calibration found.")
+    result = _load_calibration(_gaze_mapper)
+    if result is None:
         return False
-    data = np.load(path, allow_pickle=True)
-    if "coord_space" not in data.files or str(data["coord_space"]) != "scene":
-        print("  ERROR: saved calibration is not in scene-cam coord space. "
-              "Recalibrate with 'c'.")
-        return False
-    poly_coeffs_x = data['poly_coeffs_x']
-    poly_coeffs_y = data['poly_coeffs_y']
-    if 'screen_width' in data.files:
-        screen_width = int(data['screen_width'])
-    if 'screen_height' in data.files:
-        screen_height = int(data['screen_height'])
-    if 'scene_width' in data.files:
-        scene_cam_width = int(data['scene_width'])
-        scene_cam_height = int(data['scene_height'])
-    scene_w = scene_cam_width
-    scene_h = scene_cam_height
-    ts = float(data['timestamp'])
-    age_hrs = (time.time() - ts) / 3600
+    if result.screen_size is not None:
+        screen_width, screen_height = result.screen_size
+    if result.scene_size is not None:
+        scene_cam_width, scene_cam_height = result.scene_size
     calibrated = True
-    print(f"Calibration loaded (age: {age_hrs:.1f}h, scene={scene_w}x{scene_h}).")
-    if age_hrs > 24:
-        print("  WARNING: Calibration is >24h old. Consider recalibrating.")
     return True
-
-
-def _dataset_root():
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "calibration",
-    )
 
 
 def _on_tk_key(ch):
@@ -594,6 +340,7 @@ def start_calibration():
     calib_tk_root.update_idletasks()
     screen_width = calib_tk_root.winfo_width()
     screen_height = calib_tk_root.winfo_height()
+    _aruco_mapper.set_screen_size(screen_width, screen_height)
 
     calib_tk_canvas = tk.Canvas(
         calib_tk_root,
@@ -619,16 +366,7 @@ def start_calibration():
             calib_points_screen.append((x, y))
     calib_total_points = len(calib_points_screen)
 
-    session_name = f"session_{time.strftime('%Y%m%d_%H%M%S')}"
-    calib_session_dir = os.path.join(_dataset_root(), session_name)
-    os.makedirs(calib_session_dir, exist_ok=True)
-    calib_labels_path = os.path.join(calib_session_dir, "labels.csv")
-    with open(calib_labels_path, "w", newline="") as f:
-        csv.writer(f).writerow([
-            "image_path", "fixation_id", "x_screen", "y_screen",
-            "pupil_x", "pupil_y", "confidence", "timestamp",
-            "scene_target_x", "scene_target_y",
-        ])
+    calib_session_dir, calib_labels_path = begin_session()
 
     print(f"Calibration started ({calib_total_points} points) on {screen_width}x{screen_height} screen.")
     print(f"  Dataset: {calib_session_dir}")
@@ -677,9 +415,10 @@ def render_calibration_overlay():
     calib_tk_canvas.create_text(screen_width // 2, 40, text=status, fill="white",
                                 anchor="n", font=("Courier", 20))
 
-    aruco_color = "#00ff00" if _last_aruco_marker_count == 4 else "#ff6060"
+    marker_count = _aruco_mapper.last_marker_count
+    aruco_color = "#00ff00" if marker_count == 4 else "#ff6060"
     calib_tk_canvas.create_text(screen_width // 2, screen_height - 40,
-                                text=f"aruco: {_last_aruco_marker_count}/4 markers visible",
+                                text=f"aruco: {marker_count}/4 markers visible",
                                 fill=aruco_color, anchor="s",
                                 font=("Courier", 16))
 
@@ -753,7 +492,7 @@ def tick_capture():
             _last_no_scene_log_ts = now
         return False
 
-    H, _ = detect_aruco_homography(last_scene_frame)
+    H, _ = _aruco_mapper.compute_homography(last_scene_frame)
     if H is None:
         now = time.time()
         if now - _last_aruco_log_ts >= 1.0:
@@ -844,7 +583,7 @@ def tick_capture():
     calib_points_scene.append(scene_median)
 
     try:
-        H_chk, reproj_err = detect_aruco_homography(last_scene_frame)
+        H_chk, reproj_err = _aruco_mapper.compute_homography(last_scene_frame)
     except Exception as e:
         H_chk, reproj_err = None, None
         print(f"  ArUco detection error for fixation {fixation_idx}: {e}")
@@ -861,8 +600,7 @@ def tick_capture():
     else:
         print(f"  ArUco: not all 4 markers visible for fixation {fixation_idx}")
 
-    with open(calib_labels_path, "a", newline="") as f:
-        csv.writer(f).writerows(calib_pending_rows)
+    append_label_rows(calib_labels_path, calib_pending_rows)
     calib_pending_rows = []
     calib_pending_image_paths = []
     calib_collecting = False
@@ -966,7 +704,7 @@ def process_camera():
             ext_frame = scene_cam.read()
             if ext_frame is not None:
                 last_scene_frame = ext_frame.copy()
-                _update_aruco_count(last_scene_frame)
+                _aruco_mapper.update_marker_count(last_scene_frame)
                 ext_frame_resized = cv2.resize(ext_frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
 
                 if calibrated and calib_state == 0:
