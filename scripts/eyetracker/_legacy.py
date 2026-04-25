@@ -46,7 +46,36 @@ from tkinter import ttk, filedialog
 import time
 from collections import deque
 
-BUFFER_SIZE = 5
+from scripts.eyetracker.config import (
+    ARUCO_DICT_NAME,
+    ARUCO_IDS,
+    ARUCO_MARKER_PX,
+    ARUCO_QUIET_ZONE_PX,
+    BUFFER_SIZE,
+    CALIB_INLIERS,
+    CALIB_SAMPLES,
+    CALIB_SCENE_STD_THRESH,
+    CALIB_STD_THRESH,
+    CALIB_WARMUP,
+    CONF_THRESH,
+    DISPLAY_HEIGHT,
+    DISPLAY_WIDTH,
+    EYE_CAM_FOCAL_LENGTH_PX,
+    EYE_CAM_FOV_DEG,
+    EYE_CAM_FOV_IS_DIAGONAL,
+    EYE_CAM_RESOLUTION,
+    HIGH_FPS_MODE,
+    PUPIL_BUFFER_SIZE,
+    PUPIL_JUMP_THRESH,
+    SCENE_REQUEST_HEIGHT,
+    SCENE_REQUEST_WIDTH,
+)
+from scripts.eyetracker.cameras.discovery import detect_cameras
+from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
+from scripts.eyetracker.cameras.utils import crop_to_aspect_ratio
+from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
+from scripts.eyetracker.pupil.pupil_labs import PupilLabsDetector
+
 screen_buffer = deque(maxlen=BUFFER_SIZE)
 
 calib_points_screen = []
@@ -59,58 +88,19 @@ calib_collecting = False
 calib_collect_frames = []
 calib_collect_scene = []
 calib_points_scene = []
-CALIB_SAMPLES = 15
-CALIB_INLIERS = 10
-CALIB_STD_THRESH = 12.0
-CALIB_SCENE_STD_THRESH = 10.0
-CALIB_WARMUP = 5
 _calib_warmup_remaining = 0
 
 poly_coeffs_x = None
 poly_coeffs_y = None
 
-HIGH_FPS_MODE = False
-
 last_pupil_center = None
 last_confidence = 0.0
 
-_pupil_detector_2d = None
-_pupil_detector_3d = None
-_pupil_camera = None
-
-# Eye cam: 0.3 MP (640x480) with 80° lens. If the spec turns out to be
-# diagonal FOV rather than horizontal, set EYE_CAM_FOV_IS_DIAGONAL = True.
-EYE_CAM_RESOLUTION = (640, 480)
-EYE_CAM_FOV_DEG = 80.0
-EYE_CAM_FOV_IS_DIAGONAL = True
-
-
-def _compute_eye_focal_length_px():
-    w, h = EYE_CAM_RESOLUTION
-    ref = math.sqrt(w * w + h * h) if EYE_CAM_FOV_IS_DIAGONAL else w
-    return (ref / 2.0) / math.tan(math.radians(EYE_CAM_FOV_DEG / 2.0))
-
-
-EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
-
-# Library confidence = min(0.99, support/circ) * (support/total_edges)^2.
-# Clean pupils typically score > 0.8; 0.25 is permissive.
-CONF_THRESH = 0.25
-
-# Outlier rejection on pupil center. A fast saccade to an extreme-gaze
-# angle moves the pupil ~200-300 px in a single 30fps frame, so the
-# threshold needs to accommodate that — only catches catastrophic flips.
-PUPIL_BUFFER_SIZE = 7
-pupil_buffer = deque(maxlen=PUPIL_BUFFER_SIZE)
-PUPIL_JUMP_THRESH = 400.0
+_pupil_detector: PupilLabsDetector | None = None
+_jump_gate: JumpGate | None = None
+_conf_gate: ConfidenceGate | None = None
 
 calibrated = False
-
-DISPLAY_WIDTH = 640
-DISPLAY_HEIGHT = 480
-
-SCENE_REQUEST_WIDTH = 1920
-SCENE_REQUEST_HEIGHT = 1080
 
 scene_cam_width = None
 scene_cam_height = None
@@ -136,39 +126,8 @@ _last_no_scene_log_ts = 0.0
 _last_aruco_log_ts = 0.0
 _last_aruco_marker_count = 0
 
-ARUCO_DICT_NAME = "DICT_4X4_50"
-ARUCO_MARKER_PX = 160
-ARUCO_QUIET_ZONE_PX = 200
-ARUCO_IDS = (0, 1, 2, 3)
 _aruco_photo_images = []
 _aruco_detector = None
-
-
-def detect_cameras(max_cams=10):
-    available_cameras = []
-    for i in range(max_cams):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            available_cameras.append(i)
-            cap.release()
-    return available_cameras
-
-
-def crop_to_aspect_ratio(image, width=640, height=480):
-    current_height, current_width = image.shape[:2]
-    desired_ratio = width / height
-    current_ratio = current_width / current_height
-
-    if current_ratio > desired_ratio:
-        new_width = int(desired_ratio * current_height)
-        offset = (current_width - new_width) // 2
-        cropped_img = image[:, offset:offset + new_width]
-    else:
-        new_height = int(current_width / desired_ratio)
-        offset = (current_height - new_height) // 2
-        cropped_img = image[offset:offset + new_height, :]
-
-    return cv2.resize(cropped_img, (width, height))
 
 
 def _get_aruco_dict():
@@ -357,64 +316,12 @@ def screen_pixel_for_scene_gaze(scene_xy, scene_bgr):
     return (float(out[0] / out[2]), float(out[1] / out[2]))
 
 
-def _get_pupil_detectors():
-    """Lazy-init Detector2D + pye3d Detector3D sharing one CameraModel."""
-    global _pupil_detector_2d, _pupil_detector_3d, _pupil_camera
-    if _pupil_detector_3d is None:
-        from pupil_detectors import Detector2D
-        from pye3d.detector_3d import CameraModel, Detector3D, DetectorMode
-        _pupil_camera = CameraModel(focal_length=EYE_CAM_FOCAL_LENGTH_PX,
-                                    resolution=(640, 480))
-        _pupil_detector_2d = Detector2D()
-        _pupil_detector_3d = Detector3D(camera=_pupil_camera,
-                                        long_term_mode=DetectorMode.blocking)
-    return _pupil_detector_2d, _pupil_detector_3d
-
-
 def reset_pye3d_model():
     """Discard the 3D eye model so the next detect call re-initializes it.
     Use after re-seating the headset."""
-    global _pupil_detector_3d
-    _pupil_detector_3d = None
+    if _pupil_detector is not None:
+        _pupil_detector.reset()
     print("Pupil 3D model reset — give it ~30s to reconverge.")
-
-
-def detect_pupil(gray_frame):
-    """Returns (center, ellipse, confidence).
-
-    center: (int, int) for cv2.circle
-    ellipse: ((cx, cy), (minor, major), angle_deg) for cv2.ellipse
-    The 2D ellipse output is from pye3d (Detector2D's ellipse refined by
-    the 3D model's constraint).
-    """
-    det2d, det3d = _get_pupil_detectors()
-    result_2d = det2d.detect(gray_frame)
-    result_2d["timestamp"] = time.perf_counter()
-    result_3d = det3d.update_and_detect(result_2d, gray_frame)
-    conf = float(result_3d["confidence"])
-    if conf <= 0.0:
-        return None, None, 0.0
-    ell = result_3d["ellipse"]
-    cx, cy = ell["center"]
-    center_int = (int(round(cx)), int(round(cy)))
-    ellipse_tuple = ((cx, cy), ell["axes"], ell["angle"])
-    return center_int, ellipse_tuple, conf
-
-
-def smooth_pupil_position(raw_center):
-    """Reject frames where pupil center jumps too far from running median."""
-    raw = np.array(raw_center, dtype=float)
-
-    if len(pupil_buffer) == 0:
-        pupil_buffer.append(raw)
-        return raw
-
-    median = np.median(np.array(pupil_buffer), axis=0)
-    if np.linalg.norm(raw - median) > PUPIL_JUMP_THRESH:
-        return None
-
-    pupil_buffer.append(raw)
-    return raw
 
 
 _last_gate_log_ts = 0.0
@@ -428,31 +335,27 @@ def process_frame(frame):
     last_eye_frame = frame.copy()
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    pupil_center, pupil_ellipse, confidence = detect_pupil(gray_frame)
+    sample = _pupil_detector.detect(gray_frame)
+    confidence = sample.confidence if sample is not None else 0.0
     last_confidence = confidence
 
     accepted = None
     reject_reason = None
-    if pupil_center is None or confidence <= 0:
+    if sample is None:
         reject_reason = "no detection"
-    elif confidence < CONF_THRESH:
-        reject_reason = f"conf={confidence:.2f} < CONF_THRESH={CONF_THRESH}"
+    elif not _conf_gate.accept(confidence):
+        reject_reason = _conf_gate.describe_reject(confidence)
     else:
-        accepted = smooth_pupil_position(pupil_center)
+        accepted = _jump_gate.accept(sample.center)
         if accepted is None:
-            jump_px = float("nan")
-            if len(pupil_buffer) > 0:
-                median = np.median(np.array(pupil_buffer), axis=0)
-                jump_px = float(np.linalg.norm(np.array(pupil_center, dtype=float) - median))
-            reject_reason = (f"jump={jump_px:.0f}px > PUPIL_JUMP_THRESH={PUPIL_JUMP_THRESH:.0f} "
-                             f"(conf={confidence:.2f})")
+            reject_reason = _jump_gate.describe_reject(sample.center, confidence)
 
     if accepted is not None:
         last_pupil_center = accepted
-        cv2.circle(frame, pupil_center, 4, (0, 255, 0), -1)
-        if pupil_ellipse is not None:
-            cv2.ellipse(frame, pupil_ellipse, (20, 255, 255), 2)
-        text = f"Pupil: ({pupil_center[0]}, {pupil_center[1]})  conf={confidence:.2f}"
+        cv2.circle(frame, sample.center, 4, (0, 255, 0), -1)
+        if sample.ellipse is not None:
+            cv2.ellipse(frame, sample.ellipse, (20, 255, 255), 2)
+        text = f"Pupil: ({sample.center[0]}, {sample.center[1]})  conf={confidence:.2f}"
         cv2.putText(frame, text, (10, frame.shape[0] - 15),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     else:
@@ -670,7 +573,8 @@ def start_calibration():
     global _aruco_photo_images
 
     calib_state = 1
-    pupil_buffer.clear()
+    if _jump_gate is not None:
+        _jump_gate.reset()
     calib_vectors_eye = []
     calib_skipped_indices = []
     calib_collecting = False
@@ -993,9 +897,22 @@ def _teardown_calibration_overlay():
     calib_tk_canvas = None
 
 
+def _build_eye_cam_settings() -> CameraSettings:
+    if HIGH_FPS_MODE:
+        return CameraSettings(request_width=320, request_height=240,
+                              request_fps=120, exposure=-5, flip_vertical=True)
+    return CameraSettings(exposure=-5, flip_vertical=True)
+
+
+def _build_scene_cam_settings() -> CameraSettings:
+    return CameraSettings(request_width=SCENE_REQUEST_WIDTH,
+                          request_height=SCENE_REQUEST_HEIGHT)
+
+
 def process_camera():
     global selected_camera, circle_x, circle_y, calibrated, last_scene_frame
     global scene_cam_width, scene_cam_height
+    global _pupil_detector, _jump_gate, _conf_gate
 
     try:
         cam_index = int(selected_camera.get())
@@ -1003,30 +920,24 @@ def process_camera():
         print("No valid camera selected.")
         return
 
-    eye_cap = cv2.VideoCapture(cam_index)
-    if not eye_cap.isOpened():
+    eye_cam = OpenCVCamera(cam_index, _build_eye_cam_settings())
+    if not eye_cam.open():
         print(f"Error: Could not open eye camera at index {cam_index}.")
         return
 
-    if HIGH_FPS_MODE:
-        eye_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        eye_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-        eye_cap.set(cv2.CAP_PROP_FPS, 120)
-
-    eye_cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+    _pupil_detector = PupilLabsDetector(focal_length_px=EYE_CAM_FOCAL_LENGTH_PX)
+    _jump_gate = JumpGate(threshold_px=PUPIL_JUMP_THRESH, buffer_size=PUPIL_BUFFER_SIZE)
+    _conf_gate = ConfidenceGate(threshold=CONF_THRESH)
 
     external_index = 1 if cam_index == 0 else 0
-    external_cap = cv2.VideoCapture(external_index)
-
-    if external_cap.isOpened():
-        external_cap.set(cv2.CAP_PROP_FRAME_WIDTH, SCENE_REQUEST_WIDTH)
-        external_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, SCENE_REQUEST_HEIGHT)
-        scene_cam_width = int(external_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        scene_cam_height = int(external_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    scene_cam = OpenCVCamera(external_index, _build_scene_cam_settings())
+    if scene_cam.open():
+        scene_cam_width = scene_cam.width
+        scene_cam_height = scene_cam.height
         print(f"Scene cam: requested {SCENE_REQUEST_WIDTH}x{SCENE_REQUEST_HEIGHT}, "
               f"got {scene_cam_width}x{scene_cam_height}")
     else:
-        external_cap = None
+        scene_cam = None
 
     circle_x = (scene_cam_width or DISPLAY_WIDTH) // 2
     circle_y = (scene_cam_height or DISPLAY_HEIGHT) // 2
@@ -1035,26 +946,25 @@ def process_camera():
     cv2.namedWindow("Eye Camera")
     cv2.moveWindow("Eye Camera", 50, 50)
 
-    if external_cap is not None:
+    if scene_cam is not None:
         cv2.namedWindow("External Camera (Gaze)")
         cv2.moveWindow("External Camera (Gaze)", 720, 50)
 
     print("Controls: 'c' = calibrate, 'l' = load calibration, 'r' = reset pupil 3D model, 'q' = quit, space = pause")
 
     while True:
-        ret_eye, eye_frame = eye_cap.read()
-        if not ret_eye:
+        eye_frame = eye_cam.read()
+        if eye_frame is None:
             break
 
-        eye_frame = cv2.flip(eye_frame, 0)
         process_frame(eye_frame)
 
         if calib_collecting:
             tick_capture()
 
-        if external_cap is not None:
-            ret_ext, ext_frame = external_cap.read()
-            if ret_ext:
+        if scene_cam is not None:
+            ext_frame = scene_cam.read()
+            if ext_frame is not None:
                 last_scene_frame = ext_frame.copy()
                 _update_aruco_count(last_scene_frame)
                 ext_frame_resized = cv2.resize(ext_frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
@@ -1097,9 +1007,9 @@ def process_camera():
             reset_pye3d_model()
 
     _teardown_calibration_overlay()
-    eye_cap.release()
-    if external_cap is not None:
-        external_cap.release()
+    eye_cam.release()
+    if scene_cam is not None:
+        scene_cam.release()
     cv2.destroyAllWindows()
 
 
