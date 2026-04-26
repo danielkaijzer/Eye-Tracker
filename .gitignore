@@ -3,10 +3,12 @@ gaze_vector.txt
 data/
 GEMINI.md
 .docs/
+Claude.md
 
 # Cache stuff
 .vscode
-Scripts/__pycache__
+.claude
+**/__pycache__/
 
 # venv
 .venv/
