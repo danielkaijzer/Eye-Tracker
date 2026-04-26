@@ -1,116 +1,139 @@
 import cv2
 import time
 import threading
+from flask import Flask, Response
 
+# --- Flask App Setup ---
+app = Flask(__name__)
+latest_frame = None
+frame_lock = threading.Lock() # Ensures Flask and OpenCV don't read/write the frame at the exact same microsecond
+
+def generate_frames():
+    global latest_frame, frame_lock
+    while True:
+        with frame_lock:
+            if latest_frame is None:
+                continue
+            # Encode the current frame to JPEG
+            ret, buffer = cv2.imencode('.jpg', latest_frame)
+            
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        
+        # Small sleep to prevent the web stream from hogging CPU
+        time.sleep(0.03) 
+
+@app.route('/')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+def run_flask():
+    # use_reloader=False is critical when running Flask inside a thread
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
+# --- Threaded Camera Setup ---
 class ThreadedCamera:
-    """
-    A class that continuously reads frames from a VideoCapture object
-    in a dedicated background thread to prevent I/O blocking.
-    """
     def __init__(self, src=0):
-        self.cap = cv2.VideoCapture(src)
-
+        self.cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+        
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
         
-        # Read the first frame to ensure the camera is working
         self.ret, self.frame = self.cap.read()
-        
-        # Get actual dimensions assigned by OpenCV
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
         self.stopped = False
-        self.new_frame_ready = False # NEW: Track when a fresh frame arrives
+        self.new_frame_ready = False 
 
     def start(self):
-        # Start the background thread
         self.thread = threading.Thread(target=self.update, args=())
-        self.thread.daemon = True # Ensures thread closes when main script exits
+        self.thread.daemon = True 
         self.thread.start()
         return self
 
     def update(self):
-        # Keep looping and grabbing the latest frame from the buffer
         while not self.stopped:
             self.ret, self.frame = self.cap.read()
-            self.new_frame_ready = True # NEW: Signal that the frame changed
+            self.new_frame_ready = True 
 
     def read(self):
-        # Return the frame along with the readiness flag
         is_new = self.new_frame_ready
-        self.new_frame_ready = False # Lower the flag once the main thread sees it
+        self.new_frame_ready = False 
         return self.ret, self.frame, is_new
 
     def stop(self):
-        # Stop the thread and release the camera
         self.stopped = True
         self.thread.join()
         self.cap.release()
 
+# --- Main Execution ---
 def main():
-    # --- Configuration ---
-    FLIP_IR_CAMERA = True  
-    EYE_CAMERA_INDEX = 0 # Set to your GC0308 index 
+    global latest_frame, frame_lock
 
-    print("Initializing eye camera... (this may take a second)")
-    
-    # Initialize and start the threaded camera
+    FLIP_IR_CAMERA = True  
+    EYE_CAMERA_INDEX = 0
+
+    print("Initializing eye camera...")
     eye_cam = ThreadedCamera(EYE_CAMERA_INDEX)
 
     if not eye_cam.ret:
-        print(f"Error: Could not open camera with index {EYE_CAMERA_INDEX}.")
-        print("Please make sure your camera is connected and the correct index is used.")
+        print(f"Error: Could not open camera {EYE_CAMERA_INDEX}.")
         return
 
-    # Start the background thread
     eye_cam.start()
 
-    # --- Setup Video Recording ---
+    # Start Flask Web Server in a daemon thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    print("Web stream started! Go to http://<your-jetson-ip>:5000 in your Mac's browser.")
+
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     file_name = f"eye_cam_{timestamp}.mp4"
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
     fps = 30.0 
-    
     out = cv2.VideoWriter(file_name, fourcc, fps, (eye_cam.width, eye_cam.height))
 
-    print(f"Recording started...\n Saving video to: {file_name}")
-    print("Press 'q' to stop.")
+    print(f"\nRecording started...\n Saving video to: {file_name}")
+    print("Press Ctrl+C in this terminal to STOP recording and save the file.")
 
     start_time = time.time()
     frames_recorded = 0
 
-    while True:
-        # Check the background thread
-        ret, frame, is_new = eye_cam.read()
+    try:
+        while True:
+            ret, frame, is_new = eye_cam.read()
 
-        # NEW: If the background thread hasn't pulled a new frame yet, wait and try again
-        if not is_new:
-            time.sleep(0.001) # Sleep for 1ms to prevent hammering the CPU
-            continue
+            if not is_new:
+                time.sleep(0.001)
+                continue
 
-        if not ret:
-            print("Error: Lost connection to the camera stream. Exiting...")
-            break
+            if not ret:
+                print("Error: Lost connection to the camera stream.")
+                break
 
-        # --- Flip IR Camera Feed if Enabled ---
-        if FLIP_IR_CAMERA:
-            frame = cv2.flip(frame, 0) # 0 for vertical flip
+            if FLIP_IR_CAMERA:
+                frame = cv2.flip(frame, 0)
 
-        # --- Write to Video File ---
-        out.write(frame)
-        frames_recorded += 1
+            # 1. Write to the file
+            out.write(frame)
+            frames_recorded += 1
 
-        # --- Display Logic ---
-        cv2.imshow('GC0308 Eye Camera Test', frame)
+            # 2. Update the global frame for Flask
+            with frame_lock:
+                latest_frame = frame.copy()
 
-        # Exit if 'q' is pressed
-        if cv2.waitKey(1) == ord('q'):
-            break
+    except KeyboardInterrupt:
+        # This catches the Ctrl+C from the user
+        print("\n\nInterrupted by user. Stopping recording...")
 
     # --- Stop Timer & Calculate ---
     end_time = time.time()
@@ -123,10 +146,8 @@ def main():
     print(f"True Capture FPS: {actual_fps:.2f} fps")
     print("-------------------------------\n")
 
-    # Clean up thread, writer, and window
     eye_cam.stop()
     out.release()
-    cv2.destroyAllWindows()
     print("Recording successfully saved and stream closed.")
 
 if __name__ == "__main__":

@@ -1,15 +1,21 @@
 # Session files
 gaze_vector.txt
+data/
+GEMINI.md
+.docs/
+Claude.md
 
 # Cache stuff
 .vscode
-Scripts/__pycache__
+.claude
+**/__pycache__/
 
 # venv
 .venv/
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+.et/
 
 # dependencies (no leading / — ignore in subfolders e.g. frontend/node_modules)
+eigen-3.3.7/
 node_modules/
 /.pnp
 .pnp.*
@@ -49,3 +55,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Old scripts
+scripts/.old/
+
