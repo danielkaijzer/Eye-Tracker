@@ -83,7 +83,7 @@ export default function DashboardPage() {
             </button>
           </div>
           <p className="mb-6 max-w-xl text-sm leading-relaxed text-zinc-300">
-            Displays a green dot in relation to where the user is looking on
+            Displays a red circle in relation to where the user is looking on
             the screen here.
           </p>
           <div className="relative mx-auto aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl bg-black">
