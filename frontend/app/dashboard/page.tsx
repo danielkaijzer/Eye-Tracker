@@ -31,9 +31,21 @@ export default function DashboardPage() {
     );
   }
 
-  /** `python scripts/linux_cam_stream.py` → MJPEG at this URL */
-  const cameraStreamUrl =
-    process.env.NEXT_PUBLIC_CAMERA_STREAM_URL ?? "http://127.0.0.1:5000/";
+  /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
+  const eyeStreamUrl =
+    process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
+  const sceneStreamUrl =
+    process.env.NEXT_PUBLIC_SCENE_STREAM_URL ?? "http://127.0.0.1:5001/scene.mjpg";
+  const loadCalibrationUrl =
+    process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "http://127.0.0.1:5001/load";
+
+  const handleLoadCalibration = async () => {
+    try {
+      await fetch(loadCalibrationUrl);
+    } catch (err) {
+      console.error("Failed to request calibration load:", err);
+    }
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#121212] font-sans text-white">
@@ -60,21 +72,27 @@ export default function DashboardPage() {
 
       <div className="flex flex-1 flex-col gap-4 p-4 lg:flex-row">
         <section className="flex min-h-[360px] flex-1 flex-col rounded-2xl border border-white p-6 lg:min-h-0">
-          <h2 className="mb-2 text-lg font-semibold">Eye Tracker</h2>
+          <div className="mb-2 flex items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold">Eye Tracker</h2>
+            <button
+              type="button"
+              onClick={handleLoadCalibration}
+              className="rounded-full border border-white bg-black px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-900"
+            >
+              Load Calibration
+            </button>
+          </div>
           <p className="mb-6 max-w-xl text-sm leading-relaxed text-zinc-300">
-            Displays a red circle in relation to where the user is looking on
+            Displays a green dot in relation to where the user is looking on
             the screen here.
           </p>
-          <div className="relative min-h-[240px] flex-1 overflow-hidden rounded-xl bg-black">
+          <div className="relative mx-auto aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl bg-black">
             {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
             <img
-              src={cameraStreamUrl}
-              alt="Live camera"
-              className="h-full min-h-[240px] w-full object-contain"
+              src={sceneStreamUrl}
+              alt="Scene camera with gaze overlay"
+              className="h-full w-full object-contain"
             />
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-8 w-8 rounded-full border-2 border-red-500 bg-transparent" />
-            </div>
           </div>
         </section>
 
@@ -84,10 +102,12 @@ export default function DashboardPage() {
               Internal Eye Feed
             </div>
             <div className="relative flex flex-1 items-center justify-center bg-black">
-              <div className="absolute inset-0 bg-gradient-to-br from-zinc-800 to-black" />
-              <span className="relative z-10 text-xs text-zinc-500">
-                Eye camera preview
-              </span>
+              {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
+              <img
+                src={eyeStreamUrl}
+                alt="Eye camera with pupil detection overlay"
+                className="h-full w-full object-contain"
+              />
             </div>
           </div>
 
@@ -123,7 +143,7 @@ export default function DashboardPage() {
         <h3 className="mb-3 text-sm font-medium text-white">Session Log:</h3>
         <pre className="font-mono text-sm leading-relaxed text-[#4CAF50]">
           {`> Camera stream initialized
-> Handshake with Raspberry Pi successful
+> Handshake with Jetson successful
 > Calibration loaded (Profile: User_01)`}
         </pre>
       </footer>
