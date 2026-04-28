@@ -31,9 +31,11 @@ export default function DashboardPage() {
     );
   }
 
-  /** `python scripts/linux_cam_stream.py` → MJPEG at this URL */
-  const cameraStreamUrl =
-    process.env.NEXT_PUBLIC_CAMERA_STREAM_URL ?? "http://127.0.0.1:5000/";
+  /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
+  const eyeStreamUrl =
+    process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
+  const sceneStreamUrl =
+    process.env.NEXT_PUBLIC_SCENE_STREAM_URL ?? "http://127.0.0.1:5001/scene.mjpg";
 
   return (
     <div className="flex min-h-screen flex-col bg-[#121212] font-sans text-white">
@@ -68,13 +70,10 @@ export default function DashboardPage() {
           <div className="relative min-h-[240px] flex-1 overflow-hidden rounded-xl bg-black">
             {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
             <img
-              src={cameraStreamUrl}
-              alt="Live camera"
+              src={sceneStreamUrl}
+              alt="Scene camera with gaze overlay"
               className="h-full min-h-[240px] w-full object-contain"
             />
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-8 w-8 rounded-full border-2 border-red-500 bg-transparent" />
-            </div>
           </div>
         </section>
 
@@ -84,10 +83,12 @@ export default function DashboardPage() {
               Internal Eye Feed
             </div>
             <div className="relative flex flex-1 items-center justify-center bg-black">
-              <div className="absolute inset-0 bg-gradient-to-br from-zinc-800 to-black" />
-              <span className="relative z-10 text-xs text-zinc-500">
-                Eye camera preview
-              </span>
+              {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
+              <img
+                src={eyeStreamUrl}
+                alt="Eye camera with pupil detection overlay"
+                className="h-full w-full object-contain"
+              />
             </div>
           </div>
 
