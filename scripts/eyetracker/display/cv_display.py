@@ -50,7 +50,7 @@ class CvDisplay(Display):
         if gaze_xy is not None and scene_w > 0 and scene_h > 0:
             disp_x = int(gaze_xy[0] * self.display_w / scene_w)
             disp_y = int(gaze_xy[1] * self.display_h / scene_h)
-            cv2.circle(resized, (disp_x, disp_y), 8, (0, 255, 0), -1)
+            cv2.circle(resized, (disp_x, disp_y), 10, (0, 0, 255), 2)
         cv2.imshow(SCENE_WINDOW, resized)
 
     def poll_key(self) -> Tuple[Optional[str], int]:
