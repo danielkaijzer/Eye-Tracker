@@ -3,7 +3,13 @@
 Mirrors the framing/annotation behavior of CvDisplay (scene downscale +
 gaze dot drawing) but pushes JPEG-encoded bytes to two HTTP endpoints
 instead of cv2.imshow windows. Used by the Next.js dashboard.
+
+Also exposes a small set of command endpoints (e.g. /load) that inject
+a key char into a queue; poll_key drains the queue so the App's existing
+key handler (`l` -> load calibration) does the work without any new
+coupling between the Display and the App.
 """
+import queue
 import threading
 import time
 from typing import Optional, Tuple
@@ -49,6 +55,7 @@ class WebDisplay(Display):
 
         self._eye = _FrameSlot()
         self._scene = _FrameSlot()
+        self._key_queue: "queue.Queue[str]" = queue.Queue()
         self._app = Flask(__name__)
         self._register_routes()
         self._server_thread: Optional[threading.Thread] = None
@@ -57,21 +64,27 @@ class WebDisplay(Display):
     def _register_routes(self) -> None:
         app = self._app
 
-        @app.after_request
+        @app.after_request  # pyright: ignore[reportUnusedFunction]
         def _cors(resp):
             resp.headers["Access-Control-Allow-Origin"] = "*"
             resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             return resp
 
-        @app.route("/eye.mjpg")
+        @app.route("/eye.mjpg")  # pyright: ignore[reportUnusedFunction]
         def eye_feed():
             return Response(_mjpeg_generator(self._eye),
                             mimetype="multipart/x-mixed-replace; boundary=frame")
 
-        @app.route("/scene.mjpg")
+        @app.route("/scene.mjpg")  # pyright: ignore[reportUnusedFunction]
         def scene_feed():
             return Response(_mjpeg_generator(self._scene),
                             mimetype="multipart/x-mixed-replace; boundary=frame")
+
+        # Plain GET so browsers don't preflight; idempotent enough for MVP.
+        @app.route("/load", methods=["GET", "POST"])  # pyright: ignore[reportUnusedFunction]
+        def load_calibration():
+            self._key_queue.put("l")
+            return ("", 204)
 
     # ---- Display interface -------------------------------------------------
 
@@ -110,11 +123,16 @@ class WebDisplay(Display):
             self._scene.put(encoded)
 
     def poll_key(self) -> Tuple[Optional[str], int]:
-        # Web display has no key input; calibration keys come from the Tk overlay.
-        # Sleep a touch so the App loop doesn't pin a core when neither cam has
-        # produced a frame yet.
+        # Web display has no real keyboard; HTTP endpoints push command keys
+        # (e.g. 'l' from /load) into the queue and we surface them here so
+        # App._handle_key dispatches them like any other keypress.
         time.sleep(0.001)
-        return None, 255
+        try:
+            ch = self._key_queue.get_nowait()
+        except queue.Empty:
+            return None, 255
+        raw = ord(ch) if len(ch) == 1 else 255
+        return ch, raw
 
     def wait_for_pause(self) -> None:
         time.sleep(0.05)
