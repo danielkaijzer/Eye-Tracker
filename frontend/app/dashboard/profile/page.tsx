@@ -84,9 +84,26 @@ export default function ProfilePage() {
                 >
                     Logo
                 </Link>
-                <div className="text-center text-sm font-medium uppercase tracking-[0.3em] text-zinc-400">
-                    Profile
-                </div>
+                <nav className="flex justify-center gap-8 text-sm font-medium text-white max-sm:gap-4 max-sm:text-xs">
+                    <Link href="/dashboard/heatmap" className="hover:text-blue-400 transition-colors">
+                        HeatMap
+                    </Link>
+                    <Link
+                        href="/dashboard/calibration"
+                        className="hover:text-blue-400 transition-colors"
+                    >
+                        Calibration
+                    </Link>
+                    <Link
+                        href="/dashboard/ml-analytics"
+                        className="hover:text-blue-400 transition-colors"
+                    >
+                        ML Analytics
+                    </Link>
+                    <Link href="/dashboard/games" className="hover:text-blue-400 transition-colors">
+                        Games
+                    </Link>
+                </nav>
                 <div className="flex justify-end">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full border border-blue-400 bg-zinc-950 text-blue-300">
                         <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">

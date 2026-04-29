@@ -61,6 +61,12 @@ export default function HeatmapPage() {
                     >
                         ML Analytics
                     </Link>
+                    <Link
+                        href="/dashboard/games"
+                        className="hover:text-blue-400 transition-colors"
+                    >
+                        Games
+                    </Link>
                 </nav>
                 <div className="flex justify-end">
                     <Link
