@@ -15,7 +15,7 @@ from scripts.eyetracker.calibration.targets import GridPattern
 from scripts.eyetracker.cameras.discovery import detect_cameras
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import (
-    BUFFER_SIZE,
+    GAZE_BUFFER_SIZE,
     CALIB_INLIERS,
     CALIB_SAMPLES,
     CALIB_SCENE_STD_THRESH,
@@ -79,7 +79,7 @@ def _build_app(eye_index: int, web: bool = False) -> App:
         jump_gate=JumpGate(threshold_px=PUPIL_JUMP_THRESH,
                            buffer_size=PUPIL_BUFFER_SIZE),
         mapper=mapper,
-        smoother=MovingAverageSmoother(window=BUFFER_SIZE),
+        smoother=MovingAverageSmoother(window=GAZE_BUFFER_SIZE),
         target_mapper=target_mapper,
         routine=routine,
         overlay=TkCalibrationOverlay(target_mapper=target_mapper),

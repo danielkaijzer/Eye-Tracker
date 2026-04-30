@@ -21,8 +21,4 @@ jobs:
         pip install -r requirements.txt
     - name: Run a simple test
       run: |
-        python -c "import scripts.3DEyeTracker"
-        python -c "import scripts.camera_test"
-        python -c "import scripts.EyeTracker_PCCR"
-        python -c "import scripts.gl_sphere"
-        python -c "import scripts.linux_cam_stream"
+        python -c "import scripts.eyetracker"

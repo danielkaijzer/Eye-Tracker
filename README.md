@@ -1,6 +1,19 @@
 # Eye Tracker project
 
-A high-precision, low-latency eye tracker prototype. Use cases include medical, marketing, sports performance coaching, gaming, day-to-day life, etc.
+A high-precision, low-latency eye tracker prototype. (Eventual) use cases can include medical, marketing, sports performance coaching, gaming, day-to-day life, etc.
+
+# How to Run the Program
+
+## Eyetracker script only
+
+`py -m scripts.eyetracker`
+`py -m scripts.eyetracker --web` if also running the frontend code. The `--web` flag is used to route camera feeds to HTTP endpoints.
+
+## Web App
+Run `py -m scripts.eyetracker --web` first
+Then open a new terminal window, `cd` (change directory) to `frontend/` and run `npm run dev`
+Log In using credentials (or sign up if you haven't yet).
+To load an existing calibrated model, click on the `Load Calibration` button on the main dashboard page.
 
 # Team: 
 Cody Lam, Daniel Kaijzer, Ethan Shim, Harwin He, Roselio Ortega
