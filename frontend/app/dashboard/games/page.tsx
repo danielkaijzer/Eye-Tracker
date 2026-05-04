@@ -187,7 +187,7 @@ export default function GamesPage() {
                 ref={gameRef}
                 className="fixed inset-0 z-50 flex h-screen w-screen flex-col overflow-hidden bg-black font-sans text-white"
             >
-                <div className="grid flex-1 gap-0 bg-black" style={{
+                <div className="grid h-full w-full gap-0 bg-black" style={{
                     gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
                     gridTemplateRows: `repeat(${gridSize}, 1fr)`,
                 }}>
@@ -198,8 +198,8 @@ export default function GamesPage() {
                             <button
                                 key={index}
                                 type="button"
-                                onClick={() => handleCellClick(index)}
-                                className={`aspect-square rounded-none border border-zinc-800 p-0 transition-colors ${isTarget
+                                onClick={() => handleCellClick(giindex)}
+                                className={`rounded-none border border-zinc-800 p-0 transition-colors ${isTarget
                                     ? "bg-emerald-400"
                                     : "bg-black hover:bg-zinc-900"
                                     }`}
