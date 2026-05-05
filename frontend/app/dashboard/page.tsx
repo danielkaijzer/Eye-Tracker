@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -50,23 +51,49 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[#121212] font-sans text-white">
       <header className="mx-4 mt-4 grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-2xl border border-white bg-black px-6 py-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-zinc-600 bg-zinc-950 text-xs text-zinc-400">
+        <Link
+          href="/dashboard"
+          aria-label="Go back to dashboard"
+          className="flex h-14 w-14 items-center justify-center rounded-full border border-zinc-600 bg-zinc-950 text-xs text-zinc-400 transition-colors hover:border-blue-400 hover:text-blue-400"
+        >
           Logo
-        </div>
+        </Link>
         <nav className="flex justify-center gap-8 text-sm font-medium text-white max-sm:gap-4 max-sm:text-xs">
-          <span>HeatMap</span>
-          <span>Calibration</span>
-          <span>ML Analytics</span>
+          <Link
+            href="/dashboard/heatmap"
+            className="hover:text-blue-400 transition-colors"
+          >
+            HeatMap
+          </Link>
+          <Link
+            href="/dashboard/calibration"
+            className="hover:text-blue-400 transition-colors"
+          >
+            Calibration
+          </Link>
+          <Link
+            href="/dashboard/ml-analytics"
+            className="hover:text-blue-400 transition-colors"
+          >
+            ML Analytics
+          </Link>
+          <Link
+            href="/dashboard/games"
+            className="hover:text-blue-400 transition-colors"
+          >
+            Games
+          </Link>
         </nav>
         <div className="flex justify-end">
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white bg-zinc-950"
-            aria-hidden
+          <Link
+            href="/dashboard/profile"
+            aria-label="Open profile page"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-white bg-zinc-950 transition-colors hover:border-blue-400 hover:text-blue-400"
           >
             <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
             </svg>
-          </div>
+          </Link>
         </div>
       </header>
 
