@@ -92,11 +92,21 @@ export default function GamesPage() {
       }
     }
 
-    if (started) {
-      document.addEventListener("keydown", handleKeyDown);
+    function handleFullscreenChange() {
+      if (started && !document.fullscreenElement) {
+        handleExit();
+      }
     }
 
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    if (started) {
+      document.addEventListener("keydown", handleKeyDown);
+      document.addEventListener("fullscreenchange", handleFullscreenChange);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
   }, [started]);
 
   useEffect(() => {
@@ -136,9 +146,25 @@ export default function GamesPage() {
   );
 
   async function handleStart() {
+    if (!gameRef.current) return;
+
+    const newGridSize = calculateGridSize(
+      window.innerWidth,
+      window.innerHeight,
+    );
+
+    try {
+      if (document.fullscreenElement !== gameRef.current) {
+        await gameRef.current.requestFullscreen();
+      }
+    } catch {
+      // Ignore fullscreen errors and still allow the game to run inline.
+    }
+
+    setGridSize(newGridSize);
     setScore(0);
     setTimeLeft(GAME_DURATION_SECONDS);
-    setTargetIndex(Math.floor(Math.random() * gridSize * gridSize));
+    setTargetIndex(Math.floor(Math.random() * newGridSize * newGridSize));
     setStatusMessage("Find and click the highlighted cell.");
     setStarted(true);
   }
@@ -169,6 +195,39 @@ export default function GamesPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#121212] text-zinc-500">
         Loading…
+      </div>
+    );
+  }
+
+  if (started) {
+    return (
+      <div
+        ref={gameRef}
+        className="fixed inset-0 z-50 flex h-screen w-screen flex-col overflow-hidden bg-black font-sans text-white"
+      >
+        <div
+          className="grid h-full w-full gap-0 bg-black"
+          style={{
+            gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+            gridTemplateRows: `repeat(${gridSize}, 1fr)`,
+          }}
+        >
+          {gridCells.map((index) => {
+            const isTarget = index === targetIndex;
+
+            return (
+              <button
+                key={index}
+                type="button"
+                onClick={() => handleCellClick(index)}
+                className={`rounded-none border border-zinc-800 p-0 transition-colors ${
+                  isTarget ? "bg-emerald-400" : "bg-black hover:bg-zinc-900"
+                }`}
+                aria-label={isTarget ? "Target cell" : `Cell ${index + 1}`}
+              />
+            );
+          })}
+        </div>
       </div>
     );
   }
