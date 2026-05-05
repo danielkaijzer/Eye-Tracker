@@ -3,11 +3,16 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+const EMULATOR_WIDTH = 1920;
+const EMULATOR_HEIGHT = 1080;
 
 export default function DashboardPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [gaze, setGaze] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,6 +29,28 @@ export default function DashboardPage() {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!ready) return;
+    let stream: MediaStream | null = null;
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: false })
+      .then((s) => {
+        stream = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+      })
+      .catch((err) => console.error("Failed to access webcam:", err));
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const ws = new WebSocket("ws://localhost:9998");
+    ws.onmessage = (e) => setGaze(JSON.parse(e.data).gaze_point);
+    return () => ws.close();
+  }, [ready]);
+
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#121212] text-zinc-500">
@@ -31,14 +58,21 @@ export default function DashboardPage() {
       </div>
     );
   }
-
+  // /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
+  // const eyeStreamUrl =
+  //   process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
+  // const sceneStreamUrl =
+  //   process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
+  //   "http://127.0.0.1:5001/scene.mjpg";
   /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
   const eyeStreamUrl =
     process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
   const sceneStreamUrl =
-    process.env.NEXT_PUBLIC_SCENE_STREAM_URL ?? "http://127.0.0.1:5001/scene.mjpg";
+    process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
+    "http://127.0.0.1:5001/scene.mjpg";
   const loadCalibrationUrl =
-    process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "http://127.0.0.1:5001/load";
+    process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ??
+    "http://127.0.0.1:5001/load";
 
   const handleLoadCalibration = async () => {
     try {
@@ -90,7 +124,11 @@ export default function DashboardPage() {
             aria-label="Open profile page"
             className="flex h-10 w-10 items-center justify-center rounded-full border border-white bg-zinc-950 transition-colors hover:border-blue-400 hover:text-blue-400"
           >
-            <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+            <svg
+              className="h-6 w-6 text-white"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
             </svg>
           </Link>
@@ -114,12 +152,40 @@ export default function DashboardPage() {
             the screen here.
           </p>
           <div className="relative mx-auto aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl bg-black">
+            {/* TESTING: 
+                The video and gaze components are the glasses display and the red dot indicating where the user it looking.
+                The video component uses the laptop webcam to test the display.
+                Delete the video and gaze components and uncomment the img component below when the MJPEG stream is available.
+            */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-full w-full object-cover"
+            />
+            {gaze && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${(gaze[0] / EMULATOR_WIDTH) * 100}%`,
+                  top: `${(gaze[1] / EMULATOR_HEIGHT) * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                  width: 24,
+                  height: 24,
+                  borderRadius: 9999,
+                  background: "rgba(239, 68, 68, 0.9)",
+                  boxShadow: "0 0 16px rgba(239, 68, 68, 0.7)",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
             {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
-            <img
+            {/* <img
               src={sceneStreamUrl}
               alt="Scene camera with gaze overlay"
               className="h-full w-full object-contain"
-            />
+            /> */}
           </div>
         </section>
 
@@ -128,13 +194,18 @@ export default function DashboardPage() {
             <div className="border-b border-zinc-700 px-4 py-3 text-sm font-medium">
               Internal Eye Feed
             </div>
-            <div className="relative flex flex-1 items-center justify-center bg-black">
+            <div className="relative flex flex-1 items-center justify-center bg-black p-4 text-center text-xs text-zinc-500">
+              {/* TESTING: 
+                  Commented this out because I don't have a 2nd camera. This is the placeholder for the internal eye display.
+                  When the internal eye feed becomes available, uncomment below.
+              */}
+              Single-camera setup — internal eye feed unavailable.
               {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
-              <img
+              {/* <img
                 src={eyeStreamUrl}
                 alt="Eye camera with pupil detection overlay"
                 className="h-full w-full object-contain"
-              />
+              /> */}
             </div>
           </div>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import GazeDot from "@/components/GazeDot";
+import HeatmapCanvas from "@/components/HeatmapCanvas";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -34,6 +36,7 @@ export default function HeatmapPage() {
 
     return (
         <div className="flex min-h-screen flex-col bg-[#121212] font-sans text-white">
+            <GazeDot />
             <header className="mx-4 mt-4 grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 rounded-2xl border border-white bg-black px-6 py-4">
                 <Link
                     href="/dashboard"
@@ -97,9 +100,7 @@ export default function HeatmapPage() {
                     <p className="mb-6 text-sm text-zinc-300">
                         Displays a heatmap of where the user has been looking on the screen over time.
                     </p>
-                    <div className="w-full h-[500px] rounded-xl bg-black border border-zinc-700 flex items-center justify-center">
-                        <p className="text-zinc-500">Heatmap visualization will be implemented here</p>
-                    </div>
+                    <HeatmapCanvas />
                 </section>
             </div>
         </div>
