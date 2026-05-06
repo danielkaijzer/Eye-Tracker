@@ -15,7 +15,9 @@ from scripts.eyetracker.calibration.targets import GridPattern
 from scripts.eyetracker.cameras.discovery import detect_cameras
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import (
-    GAZE_BUFFER_SIZE,
+    GAZE_BETA,
+    GAZE_D_CUTOFF,
+    GAZE_MIN_CUTOFF,
     CALIB_INLIERS,
     CALIB_SAMPLES,
     CALIB_SCENE_STD_THRESH,
@@ -34,7 +36,7 @@ from scripts.eyetracker.display.selection_gui import SelectionGui
 from scripts.eyetracker.display.tk_overlay import TkCalibrationOverlay
 from scripts.eyetracker.display.web_display import WebDisplay
 from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
-from scripts.eyetracker.gaze.smoothing import MovingAverageSmoother
+from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
 from scripts.eyetracker.pupil.pupil_labs import PupilLabsDetector
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
@@ -79,7 +81,9 @@ def _build_app(eye_index: int, web: bool = False) -> App:
         jump_gate=JumpGate(threshold_px=PUPIL_JUMP_THRESH,
                            buffer_size=PUPIL_BUFFER_SIZE),
         mapper=mapper,
-        smoother=MovingAverageSmoother(window=GAZE_BUFFER_SIZE),
+        smoother=OneEuroSmoother(min_cutoff=GAZE_MIN_CUTOFF,
+                                 beta=GAZE_BETA,
+                                 d_cutoff=GAZE_D_CUTOFF),
         target_mapper=target_mapper,
         routine=routine,
         overlay=TkCalibrationOverlay(target_mapper=target_mapper),
