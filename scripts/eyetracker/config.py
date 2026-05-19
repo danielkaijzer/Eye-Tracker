@@ -38,7 +38,7 @@ DISPLAY_HEIGHT = 480
 # ---- Pupil detection ---------------------------------------------------------
 # Library confidence = min(0.99, support/circ) * (support/total_edges)^2.
 # Clean pupils typically score > 0.8; 0.25 is permissive.
-CONF_THRESH = 0.25
+CONF_THRESH = 0.15
 
 # Outlier rejection on pupil center. A fast saccade to an extreme-gaze
 # angle moves the pupil ~200-300 px in a single 30fps frame, so the
