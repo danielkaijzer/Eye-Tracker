@@ -5,16 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-/** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
-const eyeStreamUrl =
-  process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
-const sceneStreamUrl =
-  process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
-  "http://127.0.0.1:5001/scene.mjpg";
-const gazeJsonUrl =
-  process.env.NEXT_PUBLIC_GAZE_JSON_URL ?? "http://127.0.0.1:5001/gaze.json";
+/** `python -m scripts.eyetracker --web` → MJPEG at these URLs.
+ * Defaults are same-origin relative paths; `next.config.ts` rewrites them
+ * to the Flask server (http://127.0.0.1:5001) on the server side so a
+ * single tunnel (e.g. cloudflared on :3000) exposes both. */
+const eyeStreamUrl = process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "/eye.mjpg";
+const sceneStreamUrl = process.env.NEXT_PUBLIC_SCENE_STREAM_URL ?? "/scene.mjpg";
+const gazeJsonUrl = process.env.NEXT_PUBLIC_GAZE_JSON_URL ?? "/gaze.json";
 const loadCalibrationUrl =
-  process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "http://127.0.0.1:5001/load";
+  process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "/load";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -25,18 +24,8 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    let cancelled = false;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled) return;
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-      setReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    // DEMO MODE: auth bypass on demo/temp-public-share branch.
+    setReady(true);
   }, [router]);
 
   useEffect(() => {

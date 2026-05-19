@@ -50,23 +50,10 @@ export default function GamesPage() {
   const CELLS = gridSize * gridSize;
 
   useEffect(() => {
-    let cancelled = false;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (cancelled) return;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      setTargetIndex(Math.floor(Math.random() * CELLS));
-      setReady(true);
-    });
-
-    return () => {
-      cancelled = true;
-    };
+    // DEMO MODE: auth bypass.
+    setTargetIndex(Math.floor(Math.random() * CELLS));
+    setReady(true);
+    return;
   }, [router, CELLS]);
 
   useEffect(() => {

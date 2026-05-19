@@ -23,28 +23,10 @@ export default function ProfilePage() {
     const [username, setUsername] = useState<string>("");
 
     useEffect(() => {
-        let cancelled = false;
-
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (cancelled) return;
-
-            if (!session) {
-                router.replace("/login");
-                return;
-            }
-
-            const user = session.user;
-            const metadataUsername =
-                typeof user.user_metadata?.username === "string"
-                    ? user.user_metadata.username
-                    : typeof user.user_metadata?.full_name === "string"
-                        ? user.user_metadata.full_name
-                        : "";
-
-            setEmail(user.email ?? "");
-            setUsername(metadataUsername || user.email?.split("@")[0] || "User");
-            setReady(true);
-        });
+        // DEMO MODE: auth bypass.
+        setEmail("demo@example.com");
+        setUsername("Demo");
+        setReady(true);
 
         const startedAt = Date.now();
         const interval = window.setInterval(() => {
@@ -52,7 +34,6 @@ export default function ProfilePage() {
         }, 1000);
 
         return () => {
-            cancelled = true;
             window.clearInterval(interval);
         };
     }, [router]);
