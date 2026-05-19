@@ -47,8 +47,13 @@ PUPIL_BUFFER_SIZE = 7
 PUPIL_JUMP_THRESH = 400.0
 
 
-# ---- Gaze smoothing ----------------------------------------------------------
-GAZE_BUFFER_SIZE = 5
+# ---- Gaze smoothing (1€ filter) ----------------------------------------------
+# min_cutoff: low-speed cutoff (Hz). Lower = steadier fixations, more lag.
+# beta: speed coefficient. Higher = tracks saccades faster, less smoothing.
+# d_cutoff: cutoff on the speed estimate; rarely needs tuning.
+GAZE_MIN_CUTOFF = 1.0
+GAZE_BETA = 0.05
+GAZE_D_CUTOFF = 1.0
 
 
 # ---- Calibration -------------------------------------------------------------

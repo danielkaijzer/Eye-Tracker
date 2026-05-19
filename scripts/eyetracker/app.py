@@ -20,7 +20,7 @@ from scripts.eyetracker.cameras.base import CameraSource
 from scripts.eyetracker.cameras.utils import crop_to_aspect_ratio
 from scripts.eyetracker.display.base import CalibrationOverlay, Display
 from scripts.eyetracker.gaze.base import GazeMapper
-from scripts.eyetracker.gaze.smoothing import MovingAverageSmoother
+from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.base import PupilDetector
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
@@ -38,7 +38,7 @@ class App:
                  conf_gate: ConfidenceGate,
                  jump_gate: JumpGate,
                  mapper: GazeMapper,
-                 smoother: MovingAverageSmoother,
+                 smoother: OneEuroSmoother,
                  target_mapper: ArucoHomography,
                  routine: CalibrationRoutine,
                  overlay: CalibrationOverlay,
