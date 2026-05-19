@@ -3,16 +3,26 @@
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-const EMULATOR_WIDTH = 1920;
-const EMULATOR_HEIGHT = 1080;
+/** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
+const eyeStreamUrl =
+  process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
+const sceneStreamUrl =
+  process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
+  "http://127.0.0.1:5001/scene.mjpg";
+const gazeJsonUrl =
+  process.env.NEXT_PUBLIC_GAZE_JSON_URL ?? "http://127.0.0.1:5001/gaze.json";
+const loadCalibrationUrl =
+  process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "http://127.0.0.1:5001/load";
 
 export default function DashboardPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [gaze, setGaze] = useState<[number, number] | null>(null);
+  const [gaze, setGaze] = useState<{ x: number | null; y: number | null }>({
+    x: null,
+    y: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -31,24 +41,23 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!ready) return;
-    let stream: MediaStream | null = null;
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: false })
-      .then((s) => {
-        stream = s;
-        if (videoRef.current) videoRef.current.srcObject = s;
-      })
-      .catch((err) => console.error("Failed to access webcam:", err));
-    return () => {
-      stream?.getTracks().forEach((t) => t.stop());
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(gazeJsonUrl, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { x: number | null; y: number | null };
+        if (!cancelled) setGaze(data);
+      } catch {
+        // Backend probably not running; leave previous value.
+      }
     };
-  }, [ready]);
-
-  useEffect(() => {
-    if (!ready) return;
-    const ws = new WebSocket("ws://localhost:9998");
-    ws.onmessage = (e) => setGaze(JSON.parse(e.data).gaze_point);
-    return () => ws.close();
+    const id = setInterval(tick, 100);
+    tick();
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [ready]);
 
   if (!ready) {
@@ -58,21 +67,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-  // /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
-  // const eyeStreamUrl =
-  //   process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
-  // const sceneStreamUrl =
-  //   process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
-  //   "http://127.0.0.1:5001/scene.mjpg";
-  /** `python -m scripts.eyetracker --web` → MJPEG at these URLs */
-  const eyeStreamUrl =
-    process.env.NEXT_PUBLIC_EYE_STREAM_URL ?? "http://127.0.0.1:5001/eye.mjpg";
-  const sceneStreamUrl =
-    process.env.NEXT_PUBLIC_SCENE_STREAM_URL ??
-    "http://127.0.0.1:5001/scene.mjpg";
-  const loadCalibrationUrl =
-    process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ??
-    "http://127.0.0.1:5001/load";
 
   const handleLoadCalibration = async () => {
     try {
@@ -152,40 +146,12 @@ export default function DashboardPage() {
             the screen here.
           </p>
           <div className="relative mx-auto aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl bg-black">
-            {/* TESTING: 
-                The video and gaze components are the glasses display and the red dot indicating where the user it looking.
-                The video component uses the laptop webcam to test the display.
-                Delete the video and gaze components and uncomment the img component below when the MJPEG stream is available.
-            */}
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="h-full w-full object-cover"
-            />
-            {gaze && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${(gaze[0] / EMULATOR_WIDTH) * 100}%`,
-                  top: `${(gaze[1] / EMULATOR_HEIGHT) * 100}%`,
-                  transform: "translate(-50%, -50%)",
-                  width: 24,
-                  height: 24,
-                  borderRadius: 9999,
-                  background: "rgba(239, 68, 68, 0.9)",
-                  boxShadow: "0 0 16px rgba(239, 68, 68, 0.7)",
-                  pointerEvents: "none",
-                }}
-              />
-            )}
             {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
-            {/* <img
+            <img
               src={sceneStreamUrl}
               alt="Scene camera with gaze overlay"
               className="h-full w-full object-contain"
-            /> */}
+            />
           </div>
         </section>
 
@@ -194,18 +160,13 @@ export default function DashboardPage() {
             <div className="border-b border-zinc-700 px-4 py-3 text-sm font-medium">
               Internal Eye Feed
             </div>
-            <div className="relative flex flex-1 items-center justify-center bg-black p-4 text-center text-xs text-zinc-500">
-              {/* TESTING: 
-                  Commented this out because I don't have a 2nd camera. This is the placeholder for the internal eye display.
-                  When the internal eye feed becomes available, uncomment below.
-              */}
-              Single-camera setup — internal eye feed unavailable.
+            <div className="relative flex flex-1 items-center justify-center bg-black">
               {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
-              {/* <img
+              <img
                 src={eyeStreamUrl}
                 alt="Eye camera with pupil detection overlay"
                 className="h-full w-full object-contain"
-              /> */}
+              />
             </div>
           </div>
 
@@ -218,11 +179,15 @@ export default function DashboardPage() {
               </li>
               <li className="flex justify-between gap-4">
                 <span className="text-white">Gaze X:</span>
-                <span className="text-[#4FC3F7]">x coord</span>
+                <span className="text-[#4FC3F7]">
+                  {gaze.x ?? "—"}
+                </span>
               </li>
               <li className="flex justify-between gap-4">
                 <span className="text-white">Gaze Y:</span>
-                <span className="text-[#4FC3F7]">y coord</span>
+                <span className="text-[#4FC3F7]">
+                  {gaze.y ?? "—"}
+                </span>
               </li>
               <li className="flex justify-between gap-4">
                 <span className="text-white">Accuracy:</span>
