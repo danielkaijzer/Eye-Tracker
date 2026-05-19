@@ -16,7 +16,7 @@ from typing import Optional, Tuple
 
 import cv2
 import numpy as np
-from flask import Flask, Response
+from flask import Flask, Response, jsonify
 
 from scripts.eyetracker.config import DISPLAY_HEIGHT, DISPLAY_WIDTH
 from scripts.eyetracker.display.base import Display, XY
@@ -55,6 +55,8 @@ class WebDisplay(Display):
 
         self._eye = _FrameSlot()
         self._scene = _FrameSlot()
+        self._gaze_lock = threading.Lock()
+        self._latest_gaze: Optional[XY] = None
         self._key_queue: "queue.Queue[str]" = queue.Queue()
         self._app = Flask(__name__)
         self._register_routes()
@@ -85,6 +87,14 @@ class WebDisplay(Display):
         def load_calibration():
             self._key_queue.put("l")
             return ("", 204)
+
+        @app.route("/gaze.json")  # pyright: ignore[reportUnusedFunction]
+        def gaze_json():
+            with self._gaze_lock:
+                xy = self._latest_gaze
+            if xy is None:
+                return jsonify(x=None, y=None)
+            return jsonify(x=int(xy[0]), y=int(xy[1]))
 
     # ---- Display interface -------------------------------------------------
 
@@ -118,6 +128,8 @@ class WebDisplay(Display):
             disp_x = int(gaze_xy[0] * self.display_w / scene_w)
             disp_y = int(gaze_xy[1] * self.display_h / scene_h)
             cv2.circle(resized, (disp_x, disp_y), 10, (0, 0, 255), 2)
+        with self._gaze_lock:
+            self._latest_gaze = gaze_xy
         encoded = _encode_jpeg(resized)
         if encoded is not None:
             self._scene.put(encoded)
