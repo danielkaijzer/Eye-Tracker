@@ -107,7 +107,7 @@ export default function GamesPage() {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [started]);
+  }, [started, handleExit]);
 
   useEffect(() => {
     if (!started) return;
@@ -220,9 +220,8 @@ export default function GamesPage() {
                 key={index}
                 type="button"
                 onClick={() => handleCellClick(index)}
-                className={`rounded-none border border-zinc-800 p-0 transition-colors ${
-                  isTarget ? "bg-emerald-400" : "bg-black hover:bg-zinc-900"
-                }`}
+                className={`rounded-none border border-zinc-800 p-0 transition-colors ${isTarget ? "bg-emerald-400" : "bg-black hover:bg-zinc-900"
+                  }`}
                 aria-label={isTarget ? "Target cell" : `Cell ${index + 1}`}
               />
             );
@@ -311,11 +310,10 @@ export default function GamesPage() {
                       type="button"
                       onClick={() => handleCellClick(index)}
                       disabled={!started}
-                      className={`aspect-square rounded-2xl border transition-all duration-150 ${
-                        isTarget
-                          ? "border-emerald-400 bg-emerald-400/90 shadow-[0_0_24px_rgba(52,211,153,0.45)]"
-                          : "border-white/10 bg-black/40 hover:border-blue-400/60 hover:bg-white/5"
-                      } disabled:cursor-default`}
+                      className={`aspect-square rounded-2xl border transition-all duration-150 ${isTarget
+                        ? "border-emerald-400 bg-emerald-400/90 shadow-[0_0_24px_rgba(52,211,153,0.45)]"
+                        : "border-white/10 bg-black/40 hover:border-blue-400/60 hover:bg-white/5"
+                        } disabled:cursor-default`}
                       aria-label={
                         isTarget ? "Target cell" : `Cell ${index + 1}`
                       }
