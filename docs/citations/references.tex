@@ -1,0 +1,25 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage[backend=bibtex,style=numeric,sorting=nyt]{biblatex}
+
+\addbibresource{references.bib}
+
+\title{Eye Tracker --- External References}
+\author{Cody Lam, Daniel Kaijzer, Ethan Shim, Harwin He, Roselio Ortega}
+\date{05/21/2026}
+
+\begin{document}
+\maketitle
+
+This document lists external contributions --- libraries, algorithms,
+tutorials, and AI tools --- that influenced the eye-tracker project, per
+the course requirements. Dependency-manager packages (those listed in
+\texttt{requirements.txt} and \texttt{package.json}) are not enumerated
+here unless their algorithm or paper is directly load-bearing.
+
+\nocite{*}
+\printbibliography[heading=none]
+
+\end{document}
