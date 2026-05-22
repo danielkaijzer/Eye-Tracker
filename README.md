@@ -4,6 +4,35 @@ A high-precision, low-latency eye tracker prototype. Eventual use cases include 
 
 A head-mounted rig pairs an IR eye camera with a forward-facing scene camera. A Python pipeline detects the pupil, calibrates a polynomial mapping from pupil pixels to scene-camera pixels, and either renders the gaze locally (OpenCV) or streams annotated frames over HTTP for a Next.js dashboard to overlay.
 
+## Install
+
+**Python backend** (3.11+ recommended):
+
+```
+brew install eigen opencv                       # macOS system deps for pupil-detectors
+git clone https://github.com/pupil-labs/pupil-detectors.git ../pupil-detectors
+pip install -r requirements.txt                 # installs the local pupil-detectors clone
+```
+
+`requirements.txt` references `../pupil-detectors` as a local path; adjust the clone location or edit the path if your layout differs. `pye3d` ships from PyPI.
+
+**Frontend** (Node 20+):
+
+```
+cd frontend
+npm install
+cp .env.local.example .env.local                # then fill in the two Supabase keys
+```
+
+`frontend/.env.local` needs:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+**Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the laptop screen — nothing to print or mount.
+
 ## Running
 
 Backend (eye tracker only):
@@ -112,7 +141,14 @@ See [`docs/polynomial_gaze_mapping.md`](docs/polynomial_gaze_mapping.md) for the
 - **Python** — [PEP 8](https://peps.python.org/pep-0008/). Enforced by `flake8` in CI (`.github/workflows/linter.yml`): blocking on `E9`/`F63`/`F7`/`F82` (syntax errors, undefined names), with line length 127 and McCabe complexity 10 as non-blocking warnings. Public-facing modules, classes, and functions carry docstrings.
 - **TypeScript / React** — Next.js ESLint preset (`eslint-config-next/core-web-vitals` + `eslint-config-next/typescript`), configured in `frontend/eslint.config.mjs`. `frontend/tsconfig.json` enables `strict: true`. Exported React components carry JSDoc.
 
-External references the project relies on are catalogued in [`docs/citations/references.bib`](docs/citations/references.bib); the system architecture lives in [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl) (Structurizr DSL, renders at <https://structurizr.com/dsl>).
+## Design & architecture
+
+- **UI wireframes** — [Opticore on Figma](https://www.figma.com/design/WKvgVunFAci4GsTFlWHqsr/Opticore?node-id=0-1&p=f)
+- **C4 architecture model** — [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl) (Structurizr DSL with C1/C2/C3 views). To render:
+  1. Open <https://structurizr.com/dsl>
+  2. Paste the contents of `workspace.dsl` into the left-hand editor
+  3. Use the diagram dropdown to switch between the System Context (C1), Container (C2), and Component (C3) views
+- **External references** — catalogued in [`docs/citations/references.bib`](docs/citations/references.bib)
 
 ## Roadmap
 
