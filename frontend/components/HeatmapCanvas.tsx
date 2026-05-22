@@ -16,6 +16,20 @@ type GazeSample = {
   h: number | null;
 };
 
+/**
+ * Scene-camera MJPEG stream with a cumulative gaze heatmap overlaid.
+ *
+ * Polls `NEXT_PUBLIC_GAZE_JSON_URL` (default `/gaze.json`) every 100ms and
+ * stamps a translucent radial blob at each new gaze sample on a canvas
+ * positioned over `NEXT_PUBLIC_SCENE_STREAM_URL`. The container aspect
+ * ratio follows the scene-cam dimensions reported by the backend so the
+ * heat stays aligned with the underlying image. Stationary repeats are
+ * skipped so a held gaze doesn't burn a single hot spot. The "Clear"
+ * button wipes the canvas.
+ *
+ * Takes no props. Cleans up the poll interval and ResizeObserver on
+ * unmount; silently no-ops when the backend is unreachable.
+ */
 export default function HeatmapCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);

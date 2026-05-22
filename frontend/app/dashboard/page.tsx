@@ -16,6 +16,19 @@ const gazeJsonUrl = process.env.NEXT_PUBLIC_GAZE_JSON_URL ?? "/gaze.json";
 const loadCalibrationUrl =
   process.env.NEXT_PUBLIC_LOAD_CALIBRATION_URL ?? "/load";
 
+/**
+ * Main dashboard route (`/dashboard`).
+ *
+ * Renders the scene-cam MJPEG with the gaze dot, the internal eye-cam
+ * feed, live (x, y) gaze metrics polled from `NEXT_PUBLIC_GAZE_JSON_URL`
+ * every 100ms, and a "Load Calibration" button that pings
+ * `NEXT_PUBLIC_LOAD_CALIBRATION_URL` so the Python backend reloads the
+ * most recent saved fit. Also exposes nav links to the heatmap,
+ * calibration, ML-analytics, games, and profile pages.
+ *
+ * Note: auth is currently bypassed on the demo branch — `ready` flips to
+ * `true` immediately rather than waiting on Supabase.
+ */
 export default function DashboardPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
