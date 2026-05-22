@@ -118,14 +118,17 @@ External references the project relies on are catalogued in [`docs/citations/ref
 
 ## Roadmap
 
+
 - [x] Physical prototype with model-based eye tracking, processing on a laptop/PC, data streaming to the terminal.
 - [x] Web dashboard for visualizing live gaze.
 - [x] Real-time heatmap overlay for analyzing session patterns.
+
+Beyond this course:
 - [ ] Data-collection pipeline for ground-truth gaze datasets (see `docs/data_collection.md`).
 - [ ] 3D model-based pipeline (calibration jig for extrinsics; principled eye-model fit).
 - [ ] Learned (CNN) gaze estimation trained on the collected data.
 - [ ] Mobile setup: Jetson Nano streaming over Wi-Fi to a laptop.
-- [ ] Fully embedded: AI inference on a Raspberry Pi, data streaming to the web app over Wi-Fi.
+- [ ] Fully embedded: AI inference on a Jetson Nano, data streaming to the web app over Wi-Fi.
 
 ## Team
 
