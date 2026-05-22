@@ -38,8 +38,6 @@ Then open the dashboard, log in (or sign up), and click **Load Calibration** to 
 | `space` | Pause |
 | `q` | Quit |
 
-Calibration requires four ArUco markers (IDs 0/1/2/3, `DICT_4X4_50`) pinned to the corners of the screen — they let the routine project each target's screen pixel into the scene camera to manufacture training labels.
-
 ## Repo layout
 
 ```
