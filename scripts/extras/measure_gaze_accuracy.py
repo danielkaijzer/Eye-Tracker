@@ -17,29 +17,21 @@ import math
 
 import numpy as np
 
-from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper, _build_features
+from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
 
 
 CAL_PATH = "scripts/eyetracker/calibration_pupil.npz"
 INTR_PATH = "scripts/eyetracker/scene_intrinsics.npz"
 
 
-def _per_point_errors(V, S, fx):
-    n = len(V)
-    A = np.array([_build_features(*v) for v in V])
-    rows = []
-    for i in range(n):
-        A_ = np.delete(A, i, 0)
-        bx_ = np.delete(S[:, 0], i)
-        by_ = np.delete(S[:, 1], i)
-        cx, _, _, _ = np.linalg.lstsq(A_, bx_, rcond=None)
-        cy, _, _, _ = np.linalg.lstsq(A_, by_, rcond=None)
-        px = A[i] @ cx
-        py = A[i] @ cy
-        e_px = math.hypot(px - S[i, 0], py - S[i, 1])
-        e_deg = math.degrees(math.atan(e_px / fx))
-        rows.append((i, e_px, e_deg))
-    return rows
+def _infer_degree(cal) -> int:
+    """Saved cals from before the degree-3 refactor don't have poly_degree.
+    Fall back to inferring from the coefficient-vector length so this script
+    works on both old and new files."""
+    if "poly_degree" in cal.files:
+        return int(cal["poly_degree"])
+    n_coeffs = len(cal["poly_coeffs_x"])
+    return {6: 2, 10: 3}.get(n_coeffs, 2)
 
 
 def main():
@@ -58,11 +50,13 @@ def main():
     V = cal["vectors"]
     S = cal["scene_points"]
     SP = cal["screen_points"]
+    degree = _infer_degree(cal)
 
     print("=" * 68)
     print(f"Calibration session: {ts}")
     print(f"Scene resolution:    {sw}x{sh}")
     print(f"fx (from intr):      {fx:.2f} px")
+    print(f"Polynomial degree:   {degree}")
     print()
     print(f"scene_points x range: {float(S[:, 0].min()):7.1f} .. {float(S[:, 0].max()):7.1f}  "
           f"({(S[:, 0].max() - S[:, 0].min()) / sw * 100:.1f}% of frame width)")
@@ -70,7 +64,7 @@ def main():
           f"({(S[:, 1].max() - S[:, 1].min()) / sh * 100:.1f}% of frame height)")
     print()
 
-    report = PolynomialGazeMapper().fit(V, S)
+    report = PolynomialGazeMapper(degree=degree).fit(V, S)
     avg_deg = math.degrees(math.atan(report.loo_avg_err / fx))
     max_deg = math.degrees(math.atan(report.loo_max_err / fx))
     print(f"n_points:  {report.n_points}")
@@ -80,8 +74,11 @@ def main():
 
     print("Per-point error (sorted worst → best):")
     print(f"  {'pt':>3} {'px':>9} {'deg':>8}   screen_px         pupil_px")
-    rows = _per_point_errors(V, S, fx)
-    for i, e_px, e_deg in sorted(rows, key=lambda r: -r[1]):
+    errs = report.per_point_errs
+    order = sorted(range(len(errs)), key=lambda i: -errs[i])
+    for i in order:
+        e_px = float(errs[i])
+        e_deg = math.degrees(math.atan(e_px / fx))
         sp = tuple(int(x) for x in SP[i])
         vv = (float(V[i, 0]), float(V[i, 1]))
         print(f"  {i:>3} {e_px:>9.2f} {e_deg:>7.3f}°   {sp}   ({vv[0]:.1f}, {vv[1]:.1f})")

@@ -12,18 +12,8 @@ export default function HeatmapPage() {
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
-        let cancelled = false;
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (cancelled) return;
-            if (!session) {
-                router.replace("/login");
-                return;
-            }
-            setReady(true);
-        });
-        return () => {
-            cancelled = true;
-        };
+        // DEMO MODE: auth bypass.
+        setReady(true);
     }, [router]);
 
     if (!ready) {

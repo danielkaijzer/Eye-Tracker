@@ -63,10 +63,27 @@ CALIB_STD_THRESH = 12.0
 CALIB_SCENE_STD_THRESH = 10.0
 CALIB_WARMUP = 5
 
+# Quick cal: 4x3 grid, degree-2 polynomial.
+CALIB_QUICK_ROWS = 3
+CALIB_QUICK_COLS = 4
+CALIB_QUICK_MARGIN = 220
+CALIB_QUICK_DEGREE = 2
+
+# Detailed cal: 5x4 grid (20 pts) degree-3 polynomial (10 coeffs, so 2x
+# overdetermined). Smaller margin pushes targets closer to the edges
+# (where the polynomial bends hardest); 2-pass recapture trims outliers.
+# Margin must clear the ArUco quiet zone + active-target halo (~30px):
+# 140 quiet zone + 30 halo + 10 slack = 180.
+CALIB_DETAILED_ROWS = 4
+CALIB_DETAILED_COLS = 5
+CALIB_DETAILED_MARGIN = 180
+CALIB_DETAILED_DEGREE = 3
+CALIB_DETAILED_RECAPTURE_WORST = 5
+
 
 # ---- ArUco corner markers ----------------------------------------------------
 # IDs: 0=TL, 1=TR, 2=BR, 3=BL.
 ARUCO_DICT_NAME = "DICT_4X4_50"
-ARUCO_MARKER_PX = 160
-ARUCO_QUIET_ZONE_PX = 200
+ARUCO_MARKER_PX = 120
+ARUCO_QUIET_ZONE_PX = 140
 ARUCO_IDS = (0, 1, 2, 3)

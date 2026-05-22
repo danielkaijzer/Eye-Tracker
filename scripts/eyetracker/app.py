@@ -40,7 +40,8 @@ class App:
                  mapper: GazeMapper,
                  smoother: OneEuroSmoother,
                  target_mapper: ArucoHomography,
-                 routine: CalibrationRoutine,
+                 quick_routine: CalibrationRoutine,
+                 detailed_routine: CalibrationRoutine,
                  overlay: CalibrationOverlay,
                  display: Display):
         self.eye_cam = eye_cam
@@ -51,7 +52,12 @@ class App:
         self.mapper = mapper
         self.smoother = smoother
         self.target_mapper = target_mapper
-        self.routine = routine
+        self.quick_routine = quick_routine
+        self.detailed_routine = detailed_routine
+        # `routine` is the currently-active calibration state machine.
+        # `_start_calibration` reassigns it to quick_routine or
+        # detailed_routine depending on which hotkey the user pressed.
+        self.routine = quick_routine
         self.overlay = overlay
         self.display = display
 
@@ -72,13 +78,17 @@ class App:
             self.scene_cam = None
         if self.scene_cam is not None:
             print(f"Scene cam: {self.scene_cam.width}x{self.scene_cam.height}")
-            self.routine.scene_size = (self.scene_cam.width, self.scene_cam.height)
+            scene_size = (self.scene_cam.width, self.scene_cam.height)
+            self.quick_routine.scene_size = scene_size
+            self.detailed_routine.scene_size = scene_size
 
-        self.routine.jump_gate = self.jump_gate
+        self.quick_routine.jump_gate = self.jump_gate
+        self.detailed_routine.jump_gate = self.jump_gate
         self.display.open()
 
-        print("Controls: 'c' = calibrate, 'l' = load calibration, "
-              "'r' = reset pupil 3D model, 'q' = quit, space = pause")
+        print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
+              "'l' = load calibration, 'r' = reset pupil 3D model, "
+              "'q' = quit, space = pause")
 
         try:
             self._loop()
@@ -203,9 +213,12 @@ class App:
             self._handle_load()
         elif key == 'c':
             if not self.routine.is_active:
-                self._start_calibration()
+                self._start_calibration(self.quick_routine)
             elif not self.routine.is_collecting:
                 self.routine.begin_capture()
+        elif key == 'd':
+            if not self.routine.is_active:
+                self._start_calibration(self.detailed_routine)
         elif key == 's':
             if self.routine.is_active:
                 self.routine.skip()
@@ -218,7 +231,8 @@ class App:
         load_calibration_state(self.mapper)
         self.smoother.reset()
 
-    def _start_calibration(self) -> None:
+    def _start_calibration(self, routine: CalibrationRoutine) -> None:
+        self.routine = routine
         sw, sh = self.overlay.open()
         self.target_mapper.set_screen_size(sw, sh)
         if self.scene_cam is not None:

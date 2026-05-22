@@ -18,7 +18,16 @@ from scripts.eyetracker.config import (
     GAZE_BETA,
     GAZE_D_CUTOFF,
     GAZE_MIN_CUTOFF,
+    CALIB_DETAILED_COLS,
+    CALIB_DETAILED_DEGREE,
+    CALIB_DETAILED_MARGIN,
+    CALIB_DETAILED_RECAPTURE_WORST,
+    CALIB_DETAILED_ROWS,
     CALIB_INLIERS,
+    CALIB_QUICK_COLS,
+    CALIB_QUICK_DEGREE,
+    CALIB_QUICK_MARGIN,
+    CALIB_QUICK_ROWS,
     CALIB_SAMPLES,
     CALIB_SCENE_STD_THRESH,
     CALIB_STD_THRESH,
@@ -60,18 +69,35 @@ def _build_app(eye_index: int, web: bool = False) -> App:
     scene_cam = OpenCVCamera(scene_index, _scene_cam_settings())
 
     target_mapper = ArucoHomography()
-    mapper = PolynomialGazeMapper()
-    routine = CalibrationRoutine(
-        pattern=GridPattern(rows=3, cols=4, margin=220),
-        collector=SampleCollector(
-            samples=CALIB_SAMPLES,
-            inliers=CALIB_INLIERS,
-            pupil_std_thresh=CALIB_STD_THRESH,
-            scene_std_thresh=CALIB_SCENE_STD_THRESH,
-            warmup=CALIB_WARMUP,
-        ),
+    # Shared mapper — each routine sets its desired degree before fitting,
+    # so whichever routine ran most recently is reflected in `mapper.degree`.
+    mapper = PolynomialGazeMapper(degree=CALIB_QUICK_DEGREE)
+    collector_kwargs = dict(
+        samples=CALIB_SAMPLES,
+        inliers=CALIB_INLIERS,
+        pupil_std_thresh=CALIB_STD_THRESH,
+        scene_std_thresh=CALIB_SCENE_STD_THRESH,
+        warmup=CALIB_WARMUP,
+    )
+    quick_routine = CalibrationRoutine(
+        pattern=GridPattern(rows=CALIB_QUICK_ROWS, cols=CALIB_QUICK_COLS,
+                            margin=CALIB_QUICK_MARGIN),
+        collector=SampleCollector(**collector_kwargs),
         target_mapper=target_mapper,
         mapper=mapper,
+        mapper_degree=CALIB_QUICK_DEGREE,
+        recapture_worst_n=0,
+        label="quick calibration",
+    )
+    detailed_routine = CalibrationRoutine(
+        pattern=GridPattern(rows=CALIB_DETAILED_ROWS, cols=CALIB_DETAILED_COLS,
+                            margin=CALIB_DETAILED_MARGIN),
+        collector=SampleCollector(**collector_kwargs),
+        target_mapper=target_mapper,
+        mapper=mapper,
+        mapper_degree=CALIB_DETAILED_DEGREE,
+        recapture_worst_n=CALIB_DETAILED_RECAPTURE_WORST,
+        label="detailed calibration",
     )
     return App(
         eye_cam=eye_cam,
@@ -85,7 +111,8 @@ def _build_app(eye_index: int, web: bool = False) -> App:
                                  beta=GAZE_BETA,
                                  d_cutoff=GAZE_D_CUTOFF),
         target_mapper=target_mapper,
-        routine=routine,
+        quick_routine=quick_routine,
+        detailed_routine=detailed_routine,
         overlay=TkCalibrationOverlay(target_mapper=target_mapper),
         display=WebDisplay() if web else CvDisplay(with_scene=True),
     )

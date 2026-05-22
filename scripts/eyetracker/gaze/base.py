@@ -4,8 +4,8 @@ Today's only implementation is `PolynomialGazeMapper` (2nd-degree bivariate
 polynomial). Future candidates: thin-plate spline, weighted least-squares.
 """
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -19,6 +19,9 @@ class FitReport:
     n_points: int
     loo_avg_err: float    # leave-one-out reprojection error, mean (px)
     loo_max_err: float    # leave-one-out reprojection error, max (px)
+    # Per-point LOO errors in capture order, same length as the input arrays.
+    # Used by the two-pass recapture path to identify worst fixations.
+    per_point_errs: Optional[np.ndarray] = None
 
 
 class GazeMapper(ABC):

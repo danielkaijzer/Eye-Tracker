@@ -33,7 +33,8 @@ from scripts.eyetracker.calibration.persistence import (
 )
 from scripts.eyetracker.calibration.targets import TargetPattern
 from scripts.eyetracker.config import ARUCO_IDS
-from scripts.eyetracker.gaze.base import GazeMapper
+from scripts.eyetracker.gaze.base import FitReport, GazeMapper
+from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
 from scripts.eyetracker.pupil.gating import JumpGate
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
@@ -47,12 +48,24 @@ class CalibrationRoutine:
                  collector: SampleCollector,
                  target_mapper: ArucoHomography,
                  mapper: GazeMapper,
-                 jump_gate: Optional[JumpGate] = None):
+                 jump_gate: Optional[JumpGate] = None,
+                 mapper_degree: int = 2,
+                 recapture_worst_n: int = 0,
+                 label: str = "calibration"):
         self.pattern = pattern
         self.collector = collector
         self.target_mapper = target_mapper
         self.mapper = mapper
         self.jump_gate = jump_gate
+        # Polynomial degree to apply when fitting via this routine. The
+        # mapper is shared between routines, so we set its degree just
+        # before fitting rather than at construction time.
+        self.mapper_degree = mapper_degree
+        # 0 = single pass. >0 = after pass-1 fit, drop the N highest-LOO-
+        # residual fixations and re-prompt those targets before refitting.
+        self.recapture_worst_n = recapture_worst_n
+        # Used in console output to distinguish quick vs detailed sessions.
+        self.label = label
 
         # State machine fields. is_active is the public "are we calibrating
         # right now" flag; -1 sentinel for current_idx means inactive.
@@ -63,6 +76,16 @@ class CalibrationRoutine:
         self.skipped_indices: List[int] = []
         self.captured_pupil: List[np.ndarray] = []
         self.captured_scene: List[np.ndarray] = []
+        # Target index (into self.targets) for each captured fixation.
+        # Used by the two-pass recapture path to remap "worst sample i"
+        # back to "redo target k".
+        self.captured_target_indices: List[int] = []
+        # True iff we're currently re-prompting pass-2 (recapture) targets.
+        self._in_pass_two: bool = False
+        # Original (pass-1) targets list, preserved so the saved snapshot
+        # records the full screen-point set even after self.targets is
+        # narrowed to the recapture subset in pass 2.
+        self._original_targets: List[Tuple[int, int]] = []
         self.screen_width: Optional[int] = None
         self.screen_height: Optional[int] = None
         # Set externally (by App / wiring) once the scene camera reports its
@@ -101,6 +124,9 @@ class CalibrationRoutine:
         self.skipped_indices = []
         self.captured_pupil = []
         self.captured_scene = []
+        self.captured_target_indices = []
+        self._in_pass_two = False
+        self._original_targets = []
         self.screen_width = screen_width
         self.screen_height = screen_height
         self._pending_rows = []
@@ -111,8 +137,12 @@ class CalibrationRoutine:
 
         self.session_dir, self.labels_path = begin_session()
 
-        print(f"Calibration started ({self.total_points} points) on "
+        print(f"{self.label.capitalize()} started ({self.total_points} points, "
+              f"degree-{self.mapper_degree} polynomial) on "
               f"{screen_width}x{screen_height} screen.")
+        if self.recapture_worst_n > 0:
+            print(f"  Two-pass mode: worst {self.recapture_worst_n} fixations "
+                  "will be re-prompted after pass 1.")
         print(f"  Dataset: {self.session_dir}")
         print("  Look at the RED dot and press 'c'.")
 
@@ -216,6 +246,7 @@ class CalibrationRoutine:
                 target_v: float) -> None:
         self.captured_pupil.append(result.pupil_median)
         self.captured_scene.append(result.scene_median)
+        self.captured_target_indices.append(self.current_idx)
         self._log_aruco_check(scene_frame, result.scene_median)
         append_label_rows(self.labels_path, self._pending_rows)
         self._pending_rows = []
@@ -263,38 +294,103 @@ class CalibrationRoutine:
     def _finish(self) -> None:
         n = len(self.captured_pupil)
         skipped = len(self.skipped_indices)
-        if n < 6:
+        if isinstance(self.mapper, PolynomialGazeMapper):
+            self.mapper.set_degree(self.mapper_degree)
+        min_pts = self._min_fit_points()
+        if n < min_pts:
             print(f"Not enough non-skipped points to fit "
-                  f"({n} captured, {skipped} skipped). Need at least 6.")
-        else:
-            self._fit_and_save()
-        self.is_active = False
-        self.is_collecting = False
-        self.current_idx = -1
+                  f"({n} captured, {skipped} skipped). "
+                  f"Need at least {min_pts}.")
+            self._end()
+            return
 
-    def _fit_and_save(self) -> bool:
         try:
             report = self.mapper.fit(np.array(self.captured_pupil),
                                      np.array(self.captured_scene))
         except ValueError as e:
             print(str(e))
+            self._end()
+            return
+
+        if self._should_run_pass_two(report):
+            self._begin_pass_two(report)
+            return
+
+        self._report_and_save(report)
+        self._end()
+
+    def _min_fit_points(self) -> int:
+        if isinstance(self.mapper, PolynomialGazeMapper):
+            return {2: 6, 3: 10}[self.mapper.degree]
+        return 6
+
+    def _should_run_pass_two(self, report: FitReport) -> bool:
+        if self.recapture_worst_n <= 0 or self._in_pass_two:
             return False
+        if report.per_point_errs is None:
+            return False
+        # Need enough surviving samples after drop to keep the fit valid
+        # with breathing room above the minimum.
+        keep = len(self.captured_pupil) - self.recapture_worst_n
+        return keep >= self._min_fit_points() + 1
+
+    def _begin_pass_two(self, report: FitReport) -> None:
+        errs = np.asarray(report.per_point_errs)
+        worst = sorted(np.argsort(errs)[-self.recapture_worst_n:].tolist())
+        print(f"Pass 1 LOO: avg={report.loo_avg_err:.1f}px, "
+              f"max={report.loo_max_err:.1f}px.")
+        print(f"  Re-prompting {len(worst)} worst fixations "
+              f"(per-point LOO errs: "
+              f"{[f'{errs[i]:.1f}px' for i in worst]}).")
+
+        # Capture the on-screen positions of the targets we're redoing
+        # before we mutate self.targets, and preserve the pass-1 target
+        # list for the saved snapshot.
+        recapture_target_pts = [self.targets[self.captured_target_indices[i]]
+                                for i in worst]
+        self._original_targets = list(self.targets)
+
+        keep_idx = [i for i in range(len(self.captured_pupil)) if i not in worst]
+        self.captured_pupil = [self.captured_pupil[i] for i in keep_idx]
+        self.captured_scene = [self.captured_scene[i] for i in keep_idx]
+        # Targets list is reset to the pass-2 set; index mapping inside
+        # captured_target_indices is no longer meaningful after this and
+        # we won't read it again (recapture only happens once).
+        self.captured_target_indices = []
+
+        self.targets = recapture_target_pts
+        self.skipped_indices = []
+        self.current_idx = 0
+        self.is_collecting = False
+        self.collector.reset()
+        if self.jump_gate is not None:
+            self.jump_gate.reset()
+        self._in_pass_two = True
+        print("  Look at the RED dot and press 'c'.")
+
+    def _report_and_save(self, report: FitReport) -> None:
         skipped = len(self.skipped_indices)
+        pass_label = " (pass 2)" if self._in_pass_two else ""
         print(f"Polynomial calibration fitted ({report.n_points} points, "
-              f"{skipped} skipped).")
+              f"{skipped} skipped, degree {self.mapper_degree}){pass_label}.")
         print(f"  LOO error: avg={report.loo_avg_err:.1f}px, "
               f"max={report.loo_max_err:.1f}px")
-        # 4% of scene-cam width is a rough "is the fit usable" threshold;
-        # caller can override by inspecting report directly.
         snapshot = self._build_snapshot()
         scene_w = snapshot.scene_size[0] if snapshot.scene_size is not None else 640
+        # 4% of scene-cam width is a rough "is the fit usable" threshold;
+        # caller can override by inspecting report directly.
         err_threshold = 0.04 * scene_w
         if report.loo_avg_err > err_threshold:
             print(f"  WARNING: High error (>{err_threshold:.0f}px at this "
                   "scene-cam resolution) — consider recalibrating.")
         save_calibration(snapshot, self.mapper)
         print("Calibration Complete!")
-        return True
+
+    def _end(self) -> None:
+        self.is_active = False
+        self.is_collecting = False
+        self.current_idx = -1
+        self._in_pass_two = False
 
     def _build_snapshot(self) -> CalibrationSnapshot:
         anchors = self.target_mapper.screen_anchor_points()
@@ -305,10 +401,15 @@ class CalibrationRoutine:
         screen_size = ((self.screen_width, self.screen_height)
                        if self.screen_width is not None and self.screen_height is not None
                        else None)
+        # In pass 2, self.targets has been narrowed to the recapture subset
+        # — record the full pass-1 set in the saved snapshot.
+        screen_targets = (self._original_targets
+                          if self._in_pass_two and self._original_targets
+                          else self.targets)
         return CalibrationSnapshot(
             pupil_vectors=np.array(self.captured_pupil),
             scene_points=np.array(self.captured_scene),
-            screen_points=np.array(self.targets),
+            screen_points=np.array(screen_targets),
             aruco_screen_centers=aruco_screen_centers,
             scene_size=self.scene_size,
             screen_size=screen_size,
