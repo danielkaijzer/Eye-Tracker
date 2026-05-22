@@ -57,6 +57,7 @@ class WebDisplay(Display):
         self._scene = _FrameSlot()
         self._gaze_lock = threading.Lock()
         self._latest_gaze: Optional[XY] = None
+        self._scene_size: Optional[Tuple[int, int]] = None
         self._key_queue: "queue.Queue[str]" = queue.Queue()
         self._app = Flask(__name__)
         self._register_routes()
@@ -92,9 +93,11 @@ class WebDisplay(Display):
         def gaze_json():
             with self._gaze_lock:
                 xy = self._latest_gaze
+                size = self._scene_size
+            w, h = size if size is not None else (None, None)
             if xy is None:
-                return jsonify(x=None, y=None)
-            return jsonify(x=int(xy[0]), y=int(xy[1]))
+                return jsonify(x=None, y=None, w=w, h=h)
+            return jsonify(x=int(xy[0]), y=int(xy[1]), w=w, h=h)
 
     # ---- Display interface -------------------------------------------------
 
@@ -130,6 +133,7 @@ class WebDisplay(Display):
             cv2.circle(resized, (disp_x, disp_y), 10, (0, 0, 255), 2)
         with self._gaze_lock:
             self._latest_gaze = gaze_xy
+            self._scene_size = (scene_w, scene_h)
         encoded = _encode_jpeg(resized)
         if encoded is not None:
             self._scene.put(encoded)

@@ -1,27 +1,33 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-// Emulator publishes gaze_point in these screen pixels (see
-// scripts/extras/gaze_emulator.py defaults). Adjust if you run the
-// emulator with custom --width/--height.
-const EMULATOR_WIDTH = 1920;
-const EMULATOR_HEIGHT = 1080;
+const gazeJsonUrl = process.env.NEXT_PUBLIC_GAZE_JSON_URL ?? "/gaze.json";
+const sceneStreamUrl = process.env.NEXT_PUBLIC_SCENE_STREAM_URL ?? "/scene.mjpg";
 
-// Per-sample blob — small radius, low alpha so heat *accumulates* over
-// many samples instead of any single point dominating.
-const BLOB_RADIUS = 40;
-const BLOB_ALPHA = 0.06;
+const BLOB_RADIUS = 50;
+const BLOB_ALPHA = 0.18;
+const POLL_MS = 100;
+
+type GazeSample = {
+  x: number | null;
+  y: number | null;
+  w: number | null;
+  h: number | null;
+};
 
 export default function HeatmapCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Container aspect ratio tracks scene-cam dimensions from /gaze.json so
+  // image and canvas share the exact same rect; otherwise heat drifts off-frame.
+  const [aspect, setAspect] = useState<string>("4 / 3");
 
   useEffect(() => {
-    const canvas = canvasRef.current; // rectangle representing the screen
+    const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
-    const ctx = canvas.getContext("2d"); // paintbrush
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const syncCanvasSize = () => {
@@ -30,32 +36,57 @@ export default function HeatmapCanvas() {
       canvas.height = Math.max(1, Math.floor(rect.height));
     };
     syncCanvasSize();
-    window.addEventListener("resize", syncCanvasSize);
+    const observer = new ResizeObserver(syncCanvasSize);
+    observer.observe(container);
 
-    const ws = new WebSocket("ws://localhost:9998");
-    ws.onmessage = (e) => {
-      try {
-        const { gaze_point } = JSON.parse(e.data);
-        const x = (gaze_point[0] / EMULATOR_WIDTH) * canvas.width;
-        const y = (gaze_point[1] / EMULATOR_HEIGHT) * canvas.height;
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, BLOB_RADIUS);
-        grad.addColorStop(0, `rgba(239, 68, 68, ${BLOB_ALPHA})`);
-        grad.addColorStop(1, "rgba(239, 68, 68, 0)");
-        ctx.fillStyle = grad;
-        ctx.fillRect(
-          x - BLOB_RADIUS,
-          y - BLOB_RADIUS,
-          BLOB_RADIUS * 2,
-          BLOB_RADIUS * 2,
-        );
-      } catch {
-        // Nothing happens here because we only hit this catch when we receive a malformed package. We do nothing with malformed packages.
+    let cancelled = false;
+    let lastX: number | null = null;
+    let lastY: number | null = null;
+
+    let lastAspect = "";
+    const paint = (data: GazeSample) => {
+      if (!data.w || !data.h) return;
+      const nextAspect = `${data.w} / ${data.h}`;
+      if (nextAspect !== lastAspect) {
+        lastAspect = nextAspect;
+        setAspect(nextAspect);
       }
+      if (data.x == null || data.y == null) return;
+      // Skip stationary repeats so a still gaze doesn't burn a hot spot.
+      if (data.x === lastX && data.y === lastY) return;
+      lastX = data.x;
+      lastY = data.y;
+      const cx = (data.x / data.w) * canvas.width;
+      const cy = (data.y / data.h) * canvas.height;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, BLOB_RADIUS);
+      grad.addColorStop(0, `rgba(239, 68, 68, ${BLOB_ALPHA})`);
+      grad.addColorStop(1, "rgba(239, 68, 68, 0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(
+        cx - BLOB_RADIUS,
+        cy - BLOB_RADIUS,
+        BLOB_RADIUS * 2,
+        BLOB_RADIUS * 2,
+      );
     };
 
+    const tick = async () => {
+      try {
+        const res = await fetch(gazeJsonUrl, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as GazeSample;
+        if (!cancelled) paint(data);
+      } catch {
+        // Backend probably not running; leave previous heat in place.
+      }
+    };
+    const id = setInterval(tick, POLL_MS);
+    tick();
+
     return () => {
-      ws.close();
-      window.removeEventListener("resize", syncCanvasSize);
+      cancelled = true;
+      clearInterval(id);
+      observer.disconnect();
     };
   }, []);
 
@@ -79,9 +110,19 @@ export default function HeatmapCanvas() {
       </div>
       <div
         ref={containerRef}
-        className="relative h-[500px] w-full overflow-hidden rounded-xl border border-zinc-700 bg-black"
+        style={{ aspectRatio: aspect }}
+        className="relative mx-auto w-full max-w-[960px] overflow-hidden rounded-xl border border-zinc-700 bg-black"
       >
-        <canvas ref={canvasRef} className="block h-full w-full" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- MJPEG stream from Flask; next/image does not support this */}
+        <img
+          src={sceneStreamUrl}
+          alt="Scene camera"
+          className="absolute inset-0 h-full w-full"
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 block h-full w-full"
+        />
       </div>
     </div>
   );

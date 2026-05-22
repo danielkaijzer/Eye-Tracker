@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -18,6 +19,7 @@ const loadCalibrationUrl =
 export default function DashboardPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [calibrationLoaded, setCalibrationLoaded] = useState(false);
   const [gaze, setGaze] = useState<{ x: number | null; y: number | null }>({
     x: null,
     y: null,
@@ -60,6 +62,7 @@ export default function DashboardPage() {
   const handleLoadCalibration = async () => {
     try {
       await fetch(loadCalibrationUrl);
+      setCalibrationLoaded(true);
     } catch (err) {
       console.error("Failed to request calibration load:", err);
     }
@@ -71,9 +74,16 @@ export default function DashboardPage() {
         <Link
           href="/dashboard"
           aria-label="Go back to dashboard"
-          className="flex h-14 w-14 items-center justify-center rounded-full border border-zinc-600 bg-zinc-950 text-xs text-zinc-400 transition-colors hover:border-blue-400 hover:text-blue-400"
+          className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border border-zinc-600 bg-zinc-950 transition-colors hover:border-blue-400"
         >
-          Logo
+          <Image
+            src="/Logo.png"
+            alt="Logo"
+            width={56}
+            height={56}
+            className="h-full w-full object-cover"
+            priority
+          />
         </Link>
         <nav className="flex justify-center gap-8 text-sm font-medium text-white max-sm:gap-4 max-sm:text-xs">
           <Link
@@ -164,7 +174,7 @@ export default function DashboardPage() {
             <ul className="space-y-2 text-sm">
               <li className="flex justify-between gap-4">
                 <span className="text-white">vid rate:</span>
-                <span className="text-[#4FC3F7]">x Hz</span>
+                <span className="text-[#4FC3F7]">30 Hz</span>
               </li>
               <li className="flex justify-between gap-4">
                 <span className="text-white">Gaze X:</span>
@@ -178,14 +188,14 @@ export default function DashboardPage() {
                   {gaze.y ?? "—"}
                 </span>
               </li>
-              <li className="flex justify-between gap-4">
+              {/* <li className="flex justify-between gap-4">
                 <span className="text-white">Accuracy:</span>
                 <span className="text-[#4FC3F7]">%</span>
               </li>
               <li className="flex justify-between gap-4">
                 <span className="text-white">Latency:</span>
                 <span className="text-[#4FC3F7]">ms</span>
-              </li>
+              </li> */}
             </ul>
           </div>
         </aside>
@@ -195,7 +205,6 @@ export default function DashboardPage() {
         <h3 className="mb-3 text-sm font-medium text-white">Session Log:</h3>
         <pre className="font-mono text-sm leading-relaxed text-[#4CAF50]">
           {`> Camera stream initialized
-> Handshake with Jetson successful
 > Calibration loaded (Profile: User_01)`}
         </pre>
       </footer>
