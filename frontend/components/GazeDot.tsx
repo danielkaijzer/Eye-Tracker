@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react";
 
+/**
+ * Fixed-position red dot that tracks the latest gaze coordinate.
+ *
+ * Opens a WebSocket to `ws://localhost:9998` and renders a 16px circle at
+ * the `gaze_point` from each incoming message. Returns `null` until the
+ * first sample arrives. The WebSocket is closed on unmount.
+ */
 export default function GazeDot() {
   const [pt, setPt] = useState<[number, number] | null>(null);
 

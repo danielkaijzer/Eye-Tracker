@@ -1,0 +1,86 @@
+@software{pupil_detectors,
+  author       = {{Pupil Labs GmbH}},
+  title        = {pupil-detectors: 2D pupil detection algorithms},
+  url          = {https://github.com/pupil-labs/pupil-detectors},
+  year         = {2024},
+  note         = {Wraps the Detector2D used in scripts/eyetracker/pupil/pupil_labs.py}
+}
+
+@inproceedings{kassner2014pupil,
+  author       = {Kassner, Moritz and Patera, William and Bulling, Andreas},
+  title        = {Pupil: An Open Source Platform for Pervasive Eye Tracking and Mobile Gaze-based Interaction},
+  booktitle    = {Proceedings of the 2014 ACM International Joint Conference on Pervasive and Ubiquitous Computing: Adjunct Publication (UbiComp Adjunct)},
+  pages        = {1151--1160},
+  year         = {2014},
+  publisher    = {ACM},
+  doi          = {10.1145/2638728.2641695},
+  note         = {Foundational paper for the Pupil platform; heavily inspired this project's overall architecture (head-mounted eye + scene camera rig, 2D pupil detection, ArUco-anchored calibration).}
+}
+
+@inproceedings{dierkes2019pye3d,
+  author       = {Dierkes, Kai and Kassner, Moritz and Bulling, Andreas},
+  title        = {A Fast Approach to Refraction-Aware Eye-Model Fitting and Gaze Prediction},
+  booktitle    = {Proceedings of the 11th ACM Symposium on Eye Tracking Research \& Applications (ETRA)},
+  year         = {2019},
+  publisher    = {ACM},
+  doi          = {10.1145/3314111.3319819},
+  note         = {Underlying model implemented by pye3d; resets via the `r` hotkey in the eye tracker.}
+}
+
+@misc{opencv_aruco,
+  author       = {{OpenCV}},
+  title        = {ArUco marker detection \(\texttt{cv::aruco}\)},
+  howpublished = {\url{https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html}},
+  year         = {2024},
+  note         = {Used for screen-corner detection in scripts/eyetracker/scene/aruco_homography.py.}
+}
+
+@misc{opencv_charuco_calib,
+  author       = {{OpenCV}},
+  title        = {ChArUco board camera calibration},
+  howpublished = {\url{https://docs.opencv.org/4.x/da/d13/tutorial_aruco_calibration.html}},
+  year         = {2024},
+  note         = {Followed in scripts/extras/calibrate_scene_intrinsics.py to estimate scene-camera intrinsics.}
+}
+
+@inproceedings{casiez2012oneeuro,
+  author       = {Casiez, G\'ery and Roussel, Nicolas and Vogel, Daniel},
+  title        = {{$1\euro$} Filter: A Simple Speed-Based Low-Pass Filter for Noisy Input in Interactive Systems},
+  booktitle    = {Proceedings of the ACM SIGCHI Conference on Human Factors in Computing Systems (CHI)},
+  pages        = {2527--2530},
+  year         = {2012},
+  publisher    = {ACM},
+  doi          = {10.1145/2207676.2208639},
+  note         = {Implemented in scripts/eyetracker/gaze/smoothing.py for live gaze smoothing.}
+}
+
+@misc{nextjs,
+  author       = {{Vercel}},
+  title        = {Next.js},
+  howpublished = {\url{https://nextjs.org}},
+  year         = {2024},
+  note         = {Frontend framework for the dashboard under frontend/.}
+}
+
+@misc{react,
+  author       = {{Meta Open Source}},
+  title        = {React},
+  howpublished = {\url{https://react.dev}},
+  year         = {2024}
+}
+
+@misc{supabase,
+  author       = {{Supabase Inc.}},
+  title        = {Supabase: open-source Firebase alternative},
+  howpublished = {\url{https://supabase.com}},
+  year         = {2024},
+  note         = {Authentication backend wired up in frontend/lib/supabase.ts.}
+}
+
+@misc{claude_code,
+  author       = {{Anthropic}},
+  title        = {Claude and Claude Code},
+  howpublished = {\url{https://claude.com/claude-code}},
+  year         = {2026},
+  note         = {AI assistant used during development for code review, documentation drafting, and refactor suggestions. Cited per project rubric \S6.}
+}

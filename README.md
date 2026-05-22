@@ -1,61 +1,137 @@
-# Eye Tracker project
+# Eye Tracker
 
-A high-precision, low-latency eye tracker prototype. (Eventual) use cases can include medical, marketing, sports performance coaching, gaming, day-to-day life, etc.
+A high-precision, low-latency eye tracker prototype. Eventual use cases include medical, marketing, sports performance coaching, gaming, and day-to-day life.
 
-# How to Run the Program
+A head-mounted rig pairs an IR eye camera with a forward-facing scene camera. A Python pipeline detects the pupil, calibrates a polynomial mapping from pupil pixels to scene-camera pixels, and either renders the gaze locally (OpenCV) or streams annotated frames over HTTP for a Next.js dashboard to overlay.
 
-## Eyetracker script only
+## Running
 
-`py -m scripts.eyetracker`
-`py -m scripts.eyetracker --web` if also running the frontend code. The `--web` flag is used to route camera feeds to HTTP endpoints.
+Backend (eye tracker only):
 
-## Web App
-Run `py -m scripts.eyetracker --web` first
-Then open a new terminal window, `cd` (change directory) to `frontend/` and run `npm run dev`
-Log In using credentials (or sign up if you haven't yet).
-To load an existing calibrated model, click on the `Load Calibration` button on the main dashboard page.
+```
+py -m scripts.eyetracker
+```
 
-# Team: 
-Cody Lam, Daniel Kaijzer, Ethan Shim, Harwin He, Roselio Ortega
+Backend + web frontend (routes camera feeds to HTTP MJPEG endpoints instead of opening cv2 windows):
 
-# Deliverables and milestones 
-1. Physical Prototype with basic eye tracking (model-based), processing done on laptop/PC. Data streaming to the terminal. Milestone #1
-2. A nice web app to visualize data being streamed in. Milestone #2
-3. Real-time heatmap overlay for analyzing session patterns.
-5. Mobile eye tracking setup using Jetson Nano streaming data over WiFi to a laptop. Milestone #4
-6. (TODO) Finished product with AI inference running on the Raspberry Pi and data streaming to our web app via WiFi. Milestone #5
+```
+py -m scripts.eyetracker --web
+```
 
+Frontend (in a separate terminal):
+
+```
+cd frontend
+npm run dev
+```
+
+Then open the dashboard, log in (or sign up), and click **Load Calibration** to reuse the most recent saved fit.
+
+### In-app controls (eye tracker window)
+
+| Key | Action |
+| --- | --- |
+| `c` | Quick calibration (4×3 grid, degree-2 polynomial) |
+| `d` | Detailed calibration (5×4 grid, degree-3 polynomial, with worst-point recapture) |
+| `l` | Load most recent saved calibration |
+| `r` | Reset the pye3d 3D pupil model (give it ~30 s to reconverge) |
+| `space` | Pause |
+| `q` | Quit |
+
+Calibration requires four ArUco markers (IDs 0/1/2/3, `DICT_4X4_50`) pinned to the corners of the screen — they let the routine project each target's screen pixel into the scene camera to manufacture training labels.
+
+## Repo layout
+
+```
+scripts/eyetracker/         # Main Python package — `py -m scripts.eyetracker`
+    __main__.py             # Composition root: wires concrete classes into App
+    app.py                  # Main loop, frame routing, key dispatch
+    config.py               # All tunables (camera, calibration grid, smoother, ArUco)
+    cameras/                # OpenCV camera sources + discovery
+    pupil/                  # Pupil Labs detector + confidence/jump gates
+    scene/                  # ArUco detection and screen→scene homography
+    gaze/                   # Polynomial mapper, 1€ smoother
+    calibration/            # State machine, sample collector, persistence
+    display/                # Tk calibration overlay, cv2 windows, Flask MJPEG server
+
+scripts/extras/             # Standalone utilities
+    record.py                       # Sync-recorded eye + scene MP4s
+    analyze_recordings.py           # Per-file stats on a recording dir
+    calibrate_scene_intrinsics.py   # ChArUco intrinsics for the scene camera
+    generate_charuco_board.py       # Prints the board PNG used above
+    gaze_emulator.py                # Synthetic gaze stream for frontend dev
+    measure_gaze_accuracy.py        # Post-hoc accuracy on a labeled session
+    heatmap.py, camera_test.py, linux_cam_stream.py
+
+frontend/                   # Next.js 16 / React 19 dashboard (Supabase auth)
+    app/                    # App-router pages
+        dashboard/          # calibration, games, heatmap, ml-analytics, profile
+        login/, signup/
+    components/             # GazeDot, HeatmapCanvas
+    lib/supabase.ts
+
+docs/                       # Implementation notes, citations, architecture
+    polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
+    data_collection.md              # Fields the data-collection pipeline captures
+    citations/                      # references.bib + references.tex
+    architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
+
+data/                       # Recorded MP4s + per-session calibration dumps
+3d-files/                   # STLs for the headset mounts and calibration jig
+requirements.txt            # Python deps (Flask, OpenCV, numpy, pupil-detectors)
+```
+
+## Pipeline (current, as built)
 
 ```mermaid
 graph TD
-    subgraph Hardware Layer ["Hardware Layer (Wearable Glasses)"]
-        A[120Hz Internal IR Camera] -->|Raw Byte Stream| C[Raspberry Pi / Laptop]
-        B[30Hz Front-Facing Scene Cam] -->|Video Feed| C
+    subgraph Hardware ["Head-mounted rig"]
+        EYE[IR eye camera] --> CAP[OpenCV capture]
+        SCN[Scene camera] --> CAP
     end
 
-    subgraph Backend Layer ["Backend (C++ & Python)"]
-        C --> D{Data Router}
-        D -->|UDP Stream| E[C++ Engine]
-        E -->|Geometric Processing| F[OpenCV Pupil Detection]
-        
-        D -->|Data Collation| G[Python ML Module]
-        G -->|Inference| H[TensorFlow/Edge AI Model]
-        
-        F --> I[Gaze Vector Calculation]
-        H --> I
+    subgraph Backend ["Python (scripts/eyetracker)"]
+        CAP --> PD[Pupil Labs 2D detector + pye3d]
+        PD --> GATE[Confidence + jump gates]
+        GATE --> POLY[Polynomial gaze mapper]
+        CAP --> ARUCO[ArUco screen-corner detection]
+        ARUCO -. calibration only .-> CAL[Calibration routine<br/>screen→scene homography]
+        CAL --> POLY
+        POLY --> SMOOTH[1€ smoother]
+        SMOOTH --> OUT{Display}
     end
 
-    subgraph Frontend Layer ["UI/UX (React & JS)"]
-        I -->|WebSocket/Data Stream| J[React Dashboard]
-        J --> K[Real-time Gaze Overlay]
-        J --> L[Calibration Suite]
-        J --> M[Performance Analytics]
-    end
-
-    subgraph Output ["Deliverables"]
-        K --> N[Scene Video + Red Dot]
-        M --> O[ML vs Geometric Comparison]
+    subgraph Output
+        OUT -->|cv2 windows| CV[Local view]
+        OUT -->|Flask MJPEG| WEB[Next.js dashboard<br/>GazeDot + HeatmapCanvas]
     end
 ```
 
-[Project Slide Updates](https://drive.google.com/drive/folders/1MlPhl_qL4AJbGT0cuVbFjbPvMYAlWQSm?usp=sharing)
+See [`docs/polynomial_gaze_mapping.md`](docs/polynomial_gaze_mapping.md) for the math behind the pupil→scene fit and why the homography only shows up during calibration.
+
+## Code style
+
+- **Python** — [PEP 8](https://peps.python.org/pep-0008/). Enforced by `flake8` in CI (`.github/workflows/linter.yml`): blocking on `E9`/`F63`/`F7`/`F82` (syntax errors, undefined names), with line length 127 and McCabe complexity 10 as non-blocking warnings. Public-facing modules, classes, and functions carry docstrings.
+- **TypeScript / React** — Next.js ESLint preset (`eslint-config-next/core-web-vitals` + `eslint-config-next/typescript`), configured in `frontend/eslint.config.mjs`. `frontend/tsconfig.json` enables `strict: true`. Exported React components carry JSDoc.
+
+External references the project relies on are catalogued in [`docs/citations/references.bib`](docs/citations/references.bib); the system architecture lives in [`docs/architecture/workspace.dsl`](docs/architecture/workspace.dsl) (Structurizr DSL, renders at <https://structurizr.com/dsl>).
+
+## Roadmap
+
+
+- [x] Physical prototype with model-based eye tracking, processing on a laptop/PC, data streaming to the terminal.
+- [x] Web dashboard for visualizing live gaze.
+- [x] Real-time heatmap overlay for analyzing session patterns.
+
+Beyond this course:
+- [ ] Data-collection pipeline for ground-truth gaze datasets (see `docs/data_collection.md`).
+- [ ] 3D model-based pipeline (calibration jig for extrinsics; principled eye-model fit).
+- [ ] Learned (CNN) gaze estimation trained on the collected data.
+- [ ] Mobile setup: Jetson Nano streaming over Wi-Fi to a laptop.
+- [ ] Fully embedded: AI inference on a Jetson Nano, data streaming to the web app over Wi-Fi.
+
+## Team
+
+Cody Lam, Daniel Kaijzer, Ethan Shim, Harwin He, Roselio Ortega
+
+[Project slide updates](https://drive.google.com/drive/folders/1MlPhl_qL4AJbGT0cuVbFjbPvMYAlWQSm?usp=sharing)
