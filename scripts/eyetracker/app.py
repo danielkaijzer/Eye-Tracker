@@ -42,6 +42,8 @@ class App:
                  target_mapper: ArucoHomography,
                  quick_routine: CalibrationRoutine,
                  detailed_routine: CalibrationRoutine,
+                 multipose_routine: CalibrationRoutine,
+                 validation_routine: CalibrationRoutine,
                  overlay: CalibrationOverlay,
                  display: Display):
         self.eye_cam = eye_cam
@@ -54,10 +56,15 @@ class App:
         self.target_mapper = target_mapper
         self.quick_routine = quick_routine
         self.detailed_routine = detailed_routine
+        self.multipose_routine = multipose_routine
+        self.validation_routine = validation_routine
         # `routine` is the currently-active calibration state machine.
-        # `_start_calibration` reassigns it to quick_routine or
-        # detailed_routine depending on which hotkey the user pressed.
+        # `_start_calibration` reassigns it to whichever routine the hotkey
+        # selected (quick / detailed / multi-pose / validation).
         self.routine = quick_routine
+        # All routines that need scene_size + jump_gate wired before use.
+        self._all_routines = (quick_routine, detailed_routine,
+                              multipose_routine, validation_routine)
         self.overlay = overlay
         self.display = display
 
@@ -79,14 +86,15 @@ class App:
         if self.scene_cam is not None:
             print(f"Scene cam: {self.scene_cam.width}x{self.scene_cam.height}")
             scene_size = (self.scene_cam.width, self.scene_cam.height)
-            self.quick_routine.scene_size = scene_size
-            self.detailed_routine.scene_size = scene_size
+            for routine in self._all_routines:
+                routine.scene_size = scene_size
 
-        self.quick_routine.jump_gate = self.jump_gate
-        self.detailed_routine.jump_gate = self.jump_gate
+        for routine in self._all_routines:
+            routine.jump_gate = self.jump_gate
         self.display.open()
 
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
+              "'m' = multi-pose calibrate, 'v' = validation capture, "
               "'l' = load calibration, 'r' = reset pupil 3D model, "
               "'q' = quit, space = pause")
 
@@ -214,11 +222,19 @@ class App:
         elif key == 'c':
             if not self.routine.is_active:
                 self._start_calibration(self.quick_routine)
+            elif self.routine.awaiting_pose:
+                self.routine.begin_next_pose()
             elif not self.routine.is_collecting:
                 self.routine.begin_capture()
         elif key == 'd':
             if not self.routine.is_active:
                 self._start_calibration(self.detailed_routine)
+        elif key == 'm':
+            if not self.routine.is_active:
+                self._start_calibration(self.multipose_routine)
+        elif key == 'v':
+            if not self.routine.is_active:
+                self._start_calibration(self.validation_routine)
         elif key == 's':
             if self.routine.is_active:
                 self.routine.skip()

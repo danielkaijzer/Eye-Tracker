@@ -24,6 +24,12 @@ from scripts.eyetracker.config import (
     CALIB_DETAILED_RECAPTURE_WORST,
     CALIB_DETAILED_ROWS,
     CALIB_INLIERS,
+    CALIB_MULTIPOSE_COLS,
+    CALIB_MULTIPOSE_DEGREE,
+    CALIB_MULTIPOSE_MARGIN,
+    CALIB_MULTIPOSE_ROWS,
+    CALIB_POSES,
+    CALIB_VALIDATION_DEGREE,
     CALIB_QUICK_COLS,
     CALIB_QUICK_DEGREE,
     CALIB_QUICK_MARGIN,
@@ -99,6 +105,28 @@ def _build_app(eye_index: int, web: bool = False) -> App:
         recapture_worst_n=CALIB_DETAILED_RECAPTURE_WORST,
         label="detailed calibration",
     )
+    multipose_routine = CalibrationRoutine(
+        pattern=GridPattern(rows=CALIB_MULTIPOSE_ROWS, cols=CALIB_MULTIPOSE_COLS,
+                            margin=CALIB_MULTIPOSE_MARGIN),
+        collector=SampleCollector(**collector_kwargs),
+        target_mapper=target_mapper,
+        mapper=mapper,
+        mapper_degree=CALIB_MULTIPOSE_DEGREE,
+        recapture_worst_n=0,  # pose-ambiguous; disabled in multi-pose
+        num_poses=CALIB_POSES,
+        label="multi-pose calibration",
+    )
+    validation_routine = CalibrationRoutine(
+        pattern=GridPattern(rows=CALIB_DETAILED_ROWS, cols=CALIB_DETAILED_COLS,
+                            margin=CALIB_DETAILED_MARGIN),
+        collector=SampleCollector(**collector_kwargs),
+        target_mapper=target_mapper,
+        mapper=mapper,
+        mapper_degree=CALIB_VALIDATION_DEGREE,
+        recapture_worst_n=0,
+        fit_on_finish=False,  # collect-only; never touches the live fit
+        label="validation",
+    )
     return App(
         eye_cam=eye_cam,
         scene_cam=scene_cam,
@@ -113,6 +141,8 @@ def _build_app(eye_index: int, web: bool = False) -> App:
         target_mapper=target_mapper,
         quick_routine=quick_routine,
         detailed_routine=detailed_routine,
+        multipose_routine=multipose_routine,
+        validation_routine=validation_routine,
         overlay=TkCalibrationOverlay(target_mapper=target_mapper),
         display=WebDisplay() if web else CvDisplay(with_scene=True),
     )

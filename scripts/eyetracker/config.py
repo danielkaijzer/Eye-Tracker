@@ -80,6 +80,33 @@ CALIB_DETAILED_MARGIN = 180
 CALIB_DETAILED_DEGREE = 3
 CALIB_DETAILED_RECAPTURE_WORST = 5
 
+# Multi-pose cal ('m'): run a grid at several head orientations in ONE session
+# (without removing the headset) so the eye sweeps a wider range than a head-on
+# screen allows, extending pupil/scene coverage toward the full oculomotor
+# range. Each pose is captured static; the user repositions only between poses.
+# CALIB_POSES grids x CALIB_MULTIPOSE_(ROWS*COLS) points feed a single fit, so
+# keep the grid modest. Recapture is disabled in multi-pose (pose-ambiguous).
+CALIB_POSES = 5
+CALIB_MULTIPOSE_ROWS = 3
+CALIB_MULTIPOSE_COLS = 4
+CALIB_MULTIPOSE_MARGIN = 180
+CALIB_MULTIPOSE_DEGREE = 3
+# Guidance shown per 1-based pose. Poses beyond this list fall back to a
+# generic prompt (see CalibrationRoutine.next_pose_guidance).
+CALIB_POSE_GUIDANCE = (
+    "look head-on — face the screen squarely",
+    "turn your head LEFT, keep looking at the screen",
+    "turn your head RIGHT, keep looking at the screen",
+    "tilt your head DOWN (chin down), keep looking at the screen",
+    "tilt your head UP (chin up), keep looking at the screen",
+)
+
+# Validation capture ('v'): runs the detailed grid but fits nothing and leaves
+# the live calibration untouched — it dumps held-out (pupil, scene-label) pairs
+# to validation_*.npz for measure_gaze_accuracy.py. Run it at a steep head
+# angle to probe accuracy outside the calibrated region.
+CALIB_VALIDATION_DEGREE = 3
+
 
 # ---- ArUco corner markers ----------------------------------------------------
 # IDs: 0=TL, 1=TR, 2=BR, 3=BL.

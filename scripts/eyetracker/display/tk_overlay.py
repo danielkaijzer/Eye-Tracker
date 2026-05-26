@@ -89,6 +89,11 @@ class TkCalibrationOverlay(CalibrationOverlay):
         if canvas is None:
             return
         canvas.delete("all")
+
+        if getattr(routine, "awaiting_pose", False):
+            self._render_pose_break(routine)
+            return
+
         active_idx = routine.current_idx
 
         for i, pt in enumerate(routine.targets):
@@ -119,6 +124,9 @@ class TkCalibrationOverlay(CalibrationOverlay):
         self._draw_aruco_corners()
 
         status = f"Point {active_idx + 1}/{routine.total_points}"
+        if getattr(routine, "num_poses", 1) > 1:
+            status = (f"Pose {routine.current_pose}/{routine.num_poses}  "
+                      + status)
         if routine.is_collecting:
             status += (f" - collecting "
                        f"[{routine.collecting_sample_count}/{CALIB_SAMPLES}]")
@@ -132,6 +140,35 @@ class TkCalibrationOverlay(CalibrationOverlay):
         canvas.create_text(self.screen_width // 2, self.screen_height - 40,
                            text=f"aruco: {marker_count}/4 markers visible",
                            fill=color, anchor="s", font=("Courier", 16))
+
+    def _render_pose_break(self, routine) -> None:
+        """Between-pose screen: keep the ArUco corners up (so the user can
+        check marker visibility while repositioning) and show the next-pose
+        instruction."""
+        canvas = self._canvas
+        self._draw_aruco_corners()
+        cx = self.screen_width // 2
+        cy = self.screen_height // 2
+        canvas.create_text(
+            cx, cy - 40,
+            text=f"Pose {routine.current_pose}/{routine.num_poses} done",
+            fill="white", anchor="s", font=("Courier", 28))
+        canvas.create_text(
+            cx, cy,
+            text=f"Next: {routine.next_pose_guidance()}",
+            fill="#ffd000", anchor="center", font=("Courier", 22),
+            width=int(self.screen_width * 0.7))
+        canvas.create_text(
+            cx, cy + 70,
+            text="Reposition, then press 'c' to continue ('q' to quit)",
+            fill="white", anchor="n", font=("Courier", 18))
+
+        marker_count = self.target_mapper.last_marker_count
+        color = "#00ff00" if marker_count == 4 else "#ff6060"
+        canvas.create_text(
+            cx, self.screen_height - 40,
+            text=f"aruco: {marker_count}/4 markers visible",
+            fill=color, anchor="s", font=("Courier", 16))
 
     # ---- internals ----
 
