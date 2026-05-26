@@ -24,6 +24,7 @@ from scripts.eyetracker.calibration.paths import (
     calibration_path,
     dataset_root,
     history_path,
+    validation_path,
 )
 from scripts.eyetracker.config import (
     ARUCO_DICT_NAME,
@@ -108,6 +109,29 @@ def _append_history(vectors: np.ndarray, scene_points: np.ndarray) -> None:
              all_scene_points=np.array(old_scene_points, dtype=object))
     total_pts = sum(len(v) for v in old_vectors)
     print(f"  History: {len(old_vectors)} sessions, {total_pts} total points.")
+
+
+def save_validation(snapshot: CalibrationSnapshot) -> str:
+    """Write a held-out validation capture to a timestamped `validation_*.npz`.
+
+    Unlike `save_calibration`, this fits nothing and never touches the live
+    `calibration_pupil.npz` or the history file — it just preserves the
+    (pupil, scene-label) pairs so `measure_gaze_accuracy.py` can evaluate a
+    fit on data it never saw. Returns the written path."""
+    name = time.strftime("%Y%m%d_%H%M%S")
+    path = validation_path(name)
+    sw, sh = snapshot.scene_size if snapshot.scene_size is not None else (None, None)
+    np.savez(path,
+             val_vectors=snapshot.pupil_vectors,
+             val_scene_points=snapshot.scene_points,
+             screen_points=snapshot.screen_points,
+             coord_space="scene",
+             scene_width=sw,
+             scene_height=sh,
+             timestamp=time.time())
+    print(f"  Validation set saved to {path} "
+          f"({len(snapshot.pupil_vectors)} points).")
+    return path
 
 
 def load_calibration(mapper: GazeMapper) -> Optional[LoadedCalibration]:

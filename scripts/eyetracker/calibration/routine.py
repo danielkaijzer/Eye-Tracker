@@ -11,6 +11,14 @@ Owns:
 Does NOT own the Tk overlay — the overlay reads routine state and the App
 loop drives it. The routine signals completion by setting `is_active` to
 False; the App is responsible for calling overlay.close() in response.
+
+Two construction-time modes layer on top of the basic grid:
+- `num_poses > 1` (multi-pose): run the same grid at several head poses in
+  one session, pausing in a "pose break" between them, and aggregate every
+  captured point into a single fit. See docs/multipose_calibration.md.
+- `fit_on_finish=False` (validation): capture identically but fit nothing and
+  dump the medians to validation_*.npz instead, leaving the live calibration
+  untouched. See docs/calibration_coverage.md.
 """
 import math
 import os
@@ -30,9 +38,10 @@ from scripts.eyetracker.calibration.persistence import (
     append_label_rows,
     begin_session,
     save_calibration,
+    save_validation,
 )
 from scripts.eyetracker.calibration.targets import TargetPattern
-from scripts.eyetracker.config import ARUCO_IDS
+from scripts.eyetracker.config import ARUCO_IDS, CALIB_POSE_GUIDANCE
 from scripts.eyetracker.gaze.base import FitReport, GazeMapper
 from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
 from scripts.eyetracker.pupil.gating import JumpGate
@@ -51,6 +60,8 @@ class CalibrationRoutine:
                  jump_gate: Optional[JumpGate] = None,
                  mapper_degree: int = 2,
                  recapture_worst_n: int = 0,
+                 num_poses: int = 1,
+                 fit_on_finish: bool = True,
                  label: str = "calibration"):
         self.pattern = pattern
         self.collector = collector
@@ -64,6 +75,16 @@ class CalibrationRoutine:
         # 0 = single pass. >0 = after pass-1 fit, drop the N highest-LOO-
         # residual fixations and re-prompt those targets before refitting.
         self.recapture_worst_n = recapture_worst_n
+        # >1 runs the same grid at several head poses in one session and
+        # aggregates all captured points into a single fit, extending pupil/
+        # scene coverage toward the full oculomotor range. Each pose is still
+        # captured static (the per-fixation gate rejects head motion); the user
+        # repositions only between poses.
+        self.num_poses = num_poses
+        # False = collect-only "validation" run: skip fitting / saving the live
+        # calibration and instead dump the captured medians to validation_*.npz
+        # for held-out accuracy measurement.
+        self.fit_on_finish = fit_on_finish
         # Used in console output to distinguish quick vs detailed sessions.
         self.label = label
 
@@ -82,6 +103,11 @@ class CalibrationRoutine:
         self.captured_target_indices: List[int] = []
         # True iff we're currently re-prompting pass-2 (recapture) targets.
         self._in_pass_two: bool = False
+        # Multi-pose state. current_pose is 1-based; _awaiting_pose is the
+        # "grid done, waiting for the user to reposition + press 'c'" break
+        # between poses.
+        self.current_pose: int = 1
+        self._awaiting_pose: bool = False
         # Original (pass-1) targets list, preserved so the saved snapshot
         # records the full screen-point set even after self.targets is
         # narrowed to the recapture subset in pass 2.
@@ -112,6 +138,21 @@ class CalibrationRoutine:
     def collecting_sample_count(self) -> int:
         return self.collector.sample_count()
 
+    @property
+    def awaiting_pose(self) -> bool:
+        """True while paused between poses, waiting for the user to reposition
+        their head and press 'c'. Read by the overlay to show guidance."""
+        return self._awaiting_pose
+
+    def next_pose_guidance(self, pose: Optional[int] = None) -> str:
+        """Human-readable instruction for the given 1-based pose (defaults to
+        the pose we're about to start). Falls back gracefully if there are more
+        poses than guidance strings."""
+        idx = (pose if pose is not None else self.current_pose + 1) - 1
+        if 0 <= idx < len(CALIB_POSE_GUIDANCE):
+            return CALIB_POSE_GUIDANCE[idx]
+        return "reposition your head to a new orientation"
+
     # ---- Lifecycle -----------------------------------------------------------
 
     def start(self, screen_width: int, screen_height: int) -> None:
@@ -127,6 +168,8 @@ class CalibrationRoutine:
         self.captured_target_indices = []
         self._in_pass_two = False
         self._original_targets = []
+        self.current_pose = 1
+        self._awaiting_pose = False
         self.screen_width = screen_width
         self.screen_height = screen_height
         self._pending_rows = []
@@ -143,15 +186,40 @@ class CalibrationRoutine:
         if self.recapture_worst_n > 0:
             print(f"  Two-pass mode: worst {self.recapture_worst_n} fixations "
                   "will be re-prompted after pass 1.")
+        if self.num_poses > 1:
+            print(f"  Multi-pose mode: {self.num_poses} head poses, "
+                  f"{self.total_points} points each (do not remove the headset).")
+            print(f"  Pose 1/{self.num_poses}: {self.next_pose_guidance(1)}")
+        if not self.fit_on_finish:
+            print("  Validation mode: collect-only, the live calibration "
+                  "is left untouched.")
         print(f"  Dataset: {self.session_dir}")
         print("  Look at the RED dot and press 'c'.")
 
     def begin_capture(self) -> None:
         """User pressed 'c' on an idle target. Start the per-fixation buffer."""
-        if not self.is_active or self.is_collecting:
+        if not self.is_active or self.is_collecting or self._awaiting_pose:
             return
         self.is_collecting = True
         self.collector.begin()
+
+    def begin_next_pose(self) -> None:
+        """User pressed 'c' during a pose break. Re-arm the same grid for the
+        next pose, keeping the points captured so far so they all feed one fit."""
+        if not (self.is_active and self._awaiting_pose):
+            return
+        self.current_pose += 1
+        self._awaiting_pose = False
+        self.current_idx = 0
+        self.targets = self.pattern.generate(self.screen_width, self.screen_height)
+        self.skipped_indices = []
+        self.is_collecting = False
+        self.collector.reset()
+        if self.jump_gate is not None:
+            self.jump_gate.reset()
+        print(f"Pose {self.current_pose}/{self.num_poses}: "
+              f"{self.next_pose_guidance(self.current_pose)}")
+        print("  Look at the RED dot and press 'c'.")
 
     def skip(self) -> None:
         """User pressed 's'. Mark current target skipped, advance or finish."""
@@ -280,7 +348,10 @@ class CalibrationRoutine:
 
     def _advance_or_finish(self) -> None:
         if self.current_idx + 1 >= self.total_points:
-            self._finish()
+            if self.current_pose < self.num_poses and not self._in_pass_two:
+                self._begin_pose_break()
+            else:
+                self._finish()
         else:
             self.current_idx += 1
             captured = len(self.captured_pupil)
@@ -291,9 +362,27 @@ class CalibrationRoutine:
                     print(f"  Captured {captured}/{self.total_points}. "
                           "Look at next dot, press 'c'.")
 
+    def _begin_pose_break(self) -> None:
+        """Grid for the current pose is done but more poses remain — pause and
+        wait for the user to reposition. Buffers are intentionally NOT cleared
+        so points accumulate across poses into one fit."""
+        self._awaiting_pose = True
+        self.is_collecting = False
+        self.collector.reset()
+        captured = len(self.captured_pupil)
+        next_pose = self.current_pose + 1
+        print(f"Pose {self.current_pose}/{self.num_poses} done "
+              f"({captured} points so far).")
+        print(f"  Next, {self.next_pose_guidance(next_pose)}, then press 'c' "
+              f"to start pose {next_pose}/{self.num_poses}.")
+
     def _finish(self) -> None:
         n = len(self.captured_pupil)
         skipped = len(self.skipped_indices)
+        if not self.fit_on_finish:
+            self._save_validation(n)
+            self._end()
+            return
         if isinstance(self.mapper, PolynomialGazeMapper):
             self.mapper.set_degree(self.mapper_degree)
         min_pts = self._min_fit_points()
@@ -318,6 +407,13 @@ class CalibrationRoutine:
 
         self._report_and_save(report)
         self._end()
+
+    def _save_validation(self, n: int) -> None:
+        if n < 1:
+            print("No points captured — nothing to save as validation.")
+            return
+        snapshot = self._build_snapshot()
+        save_validation(snapshot)
 
     def _min_fit_points(self) -> int:
         if isinstance(self.mapper, PolynomialGazeMapper):
@@ -401,11 +497,16 @@ class CalibrationRoutine:
         screen_size = ((self.screen_width, self.screen_height)
                        if self.screen_width is not None and self.screen_height is not None
                        else None)
-        # In pass 2, self.targets has been narrowed to the recapture subset
-        # — record the full pass-1 set in the saved snapshot.
-        screen_targets = (self._original_targets
-                          if self._in_pass_two and self._original_targets
-                          else self.targets)
+        # In pass 2 the captured_target_indices mapping is no longer valid
+        # (self.targets was narrowed to the recapture subset), so fall back to
+        # the preserved full pass-1 grid. Otherwise map each captured fixation
+        # back to its on-screen target so screen_points stays length-matched to
+        # pupil_vectors — across skips and across repeated grids in multi-pose.
+        if self._in_pass_two and self._original_targets:
+            screen_targets = self._original_targets
+        else:
+            screen_targets = [self.targets[idx]
+                              for idx in self.captured_target_indices]
         return CalibrationSnapshot(
             pupil_vectors=np.array(self.captured_pupil),
             scene_points=np.array(self.captured_scene),
