@@ -59,7 +59,7 @@ not of slippage or hardware.
 ## Why measure it as *eccentricity*
 
 To know whether a fit is trustworthy "in the center" vs "at the edge," we need a single
-number for "how far off-axis is the user looking." That number is **eccentricity**: the
+number for "how far off-axis is the user looking." That number is **(optical) eccentricity**: the
 angular distance of a gaze point from the scene camera's optical axis (its principal
 point).
 

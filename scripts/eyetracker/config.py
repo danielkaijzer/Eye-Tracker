@@ -86,7 +86,11 @@ CALIB_DETAILED_RECAPTURE_WORST = 5
 # range. Each pose is captured static; the user repositions only between poses.
 # CALIB_POSES grids x CALIB_MULTIPOSE_(ROWS*COLS) points feed a single fit, so
 # keep the grid modest. Recapture is disabled in multi-pose (pose-ambiguous).
-CALIB_POSES = 5
+# 3 = head-on + left + right (horizontal coverage), which is most of the gain
+# for a much shorter session. Bump toward 5 to add the down/up poses (vertical
+# coverage) at the cost of more user effort; CALIB_POSE_GUIDANCE supports up to
+# 5 before falling back to a generic prompt.
+CALIB_POSES = 3
 CALIB_MULTIPOSE_ROWS = 3
 CALIB_MULTIPOSE_COLS = 4
 CALIB_MULTIPOSE_MARGIN = 180

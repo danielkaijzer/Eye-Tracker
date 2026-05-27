@@ -183,7 +183,11 @@ class TkCalibrationOverlay(CalibrationOverlay):
         for marker_id in ARUCO_IDS:
             png_bytes = generate_marker_png(marker_id, ARUCO_MARKER_PX)
             b64 = base64.b64encode(png_bytes)
-            imgs.append(tk.PhotoImage(data=b64))
+            # Bind to this session's root explicitly. Without master=, Tk uses
+            # the stale tkinter._default_root (a prior, destroyed root that
+            # close() didn't clear), so on the 2nd calibration the image is
+            # created in a dead interpreter -> "image pyimageN doesn't exist".
+            imgs.append(tk.PhotoImage(master=self._root, data=b64))
         self._photo_images = imgs
         return imgs
 
