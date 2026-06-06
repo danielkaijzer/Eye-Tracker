@@ -105,6 +105,10 @@ See [`docs/polynomial_gaze_mapping.md`](docs/polynomial_gaze_mapping.md) for the
 
 - **External references** — catalogued in [`docs/citations/references.bib`](docs/citations/references.bib)
 
-# Contributors
+## Maintainer 
+
+Daniel Kaijzer
+
+## Prior contributors
 
 Cody Lam, Ethan Shim, Harwin He, Roselio Ortega
