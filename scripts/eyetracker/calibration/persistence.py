@@ -1,6 +1,22 @@
-"""Calibration .npz save/load + per-session dir + labels.csv header.
+"""Calibration persistence: JSON model + per-session metadata + labels.csv.
+
+Three on-disk artifacts, each in the format that fits its job:
+
+- `calibration.json` — the live polynomial model restored at runtime. Just the
+  coefficients + the few fields the runtime needs. Human-readable, no pickle.
+- `session_<ts>/metadata.json` — the per-session dataset record: camera
+  intrinsics/extrinsics, hardware/subject provenance, sizes, aruco config, and a
+  fit summary. Self-contained so a session is interpretable in isolation.
+- `session_<ts>/labels.csv` — one row per accepted calibration sample (the raw
+  ground-truth pairs); appended during capture so a crash mid-session keeps
+  whatever was already written.
+
+The raw sample arrays are NOT duplicated into calibration.json — they live in
+the session's labels.csv (and `metadata.json` records `source_session`).
 """
 import csv
+import datetime
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -12,15 +28,17 @@ import numpy as np
 from scripts.eyetracker.calibration.paths import (
     calibration_path,
     dataset_root,
-    history_path,
+    scene_intrinsics_path,
 )
 from scripts.eyetracker.config import (
     ARUCO_DICT_NAME,
     ARUCO_IDS,
     ARUCO_MARKER_PX,
     ARUCO_QUIET_ZONE_PX,
+    EYE_CAM_FOV_DEG,
+    EYE_CAM_RESOLUTION,
 )
-from scripts.eyetracker.gaze.base import GazeMapper
+from scripts.eyetracker.gaze.base import FitReport, GazeMapper
 
 
 LABELS_CSV_HEADER = [
@@ -48,86 +66,131 @@ class LoadedCalibration:
     screen_size: Optional[Tuple[int, int]]
 
 
-def save_calibration(snapshot: CalibrationSnapshot, mapper: GazeMapper) -> None:
-    """Write the mapper state + session metadata to `calibration_pupil.npz`,
-    and append the (vectors, scene_points) pair to the history file."""
-    path = calibration_path()
-    aruco_dict_id = int(cv2.aruco.DICT_4X4_50) if hasattr(cv2, "aruco") else -1
+def _to_list(arr) -> Optional[list]:
+    """numpy array (or None) -> JSON-serializable nested list (or None)."""
+    if arr is None:
+        return None
+    return np.asarray(arr).tolist()
+
+
+def save_calibration(snapshot: CalibrationSnapshot, mapper: GazeMapper,
+                     source_session: Optional[str] = None) -> None:
+    """Write the live model to `calibration.json`. `source_session` names the
+    session dir whose labels.csv holds the samples this fit came from."""
     state = mapper.state_dict()
-    sw, sh = snapshot.scene_size if snapshot.scene_size is not None else (None, None)
-    pw, ph = snapshot.screen_size if snapshot.screen_size is not None else (None, None)
-    np.savez(path,
-             poly_coeffs_x=state["poly_coeffs_x"],
-             poly_coeffs_y=state["poly_coeffs_y"],
-             vectors=snapshot.pupil_vectors,
-             scene_points=snapshot.scene_points,
-             screen_points=snapshot.screen_points,
-             coord_space="scene",
-             scene_width=sw,
-             scene_height=sh,
-             screen_width=pw,
-             screen_height=ph,
-             aruco_dict_id=aruco_dict_id,
-             aruco_dict_name=ARUCO_DICT_NAME,
-             aruco_marker_px=ARUCO_MARKER_PX,
-             aruco_quiet_zone_px=ARUCO_QUIET_ZONE_PX,
-             aruco_screen_centers=snapshot.aruco_screen_centers,
-             timestamp=time.time())
-    print(f"  Calibration saved to {path}")
-    _append_history(snapshot.pupil_vectors, snapshot.scene_points)
-
-
-def _append_history(vectors: np.ndarray, scene_points: np.ndarray) -> None:
-    hist_path = history_path()
-    if os.path.exists(hist_path):
-        old = np.load(hist_path, allow_pickle=True)
-        if "all_scene_points" in old.files:
-            old_vectors = list(old["all_vectors"])
-            old_scene_points = list(old["all_scene_points"])
-        else:
-            old_vectors = []
-            old_scene_points = []
-    else:
-        old_vectors = []
-        old_scene_points = []
-    old_vectors.append(vectors)
-    old_scene_points.append(scene_points)
-    np.savez(hist_path,
-             all_vectors=np.array(old_vectors, dtype=object),
-             all_scene_points=np.array(old_scene_points, dtype=object))
-    total_pts = sum(len(v) for v in old_vectors)
-    print(f"  History: {len(old_vectors)} sessions, {total_pts} total points.")
+    data = {
+        "coord_space": "scene",
+        "timestamp": time.time(),
+        "source_session": source_session,
+        "scene_size": list(snapshot.scene_size) if snapshot.scene_size else None,
+        "screen_size": list(snapshot.screen_size) if snapshot.screen_size else None,
+        "model": {
+            "type": "polynomial",
+            "degree": int(state["poly_degree"]),
+            "coeffs_x": _to_list(state["poly_coeffs_x"]),
+            "coeffs_y": _to_list(state["poly_coeffs_y"]),
+        },
+    }
+    path = calibration_path()
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  Calibration model saved to {path}")
 
 
 def load_calibration(mapper: GazeMapper) -> Optional[LoadedCalibration]:
-    """Restore mapper coefficients from disk and return session metadata.
-    Returns None if no calibration is saved or if the file's coord_space
+    """Restore mapper coefficients from `calibration.json` and return session
+    metadata. Returns None if nothing is saved or if the file's coord_space
     does not match this build (we never want to mix screen/scene fits)."""
     path = calibration_path()
     if not os.path.exists(path):
         print("No saved calibration found.")
         return None
-    data = np.load(path, allow_pickle=True)
-    if "coord_space" not in data.files or str(data["coord_space"]) != "scene":
+    with open(path) as f:
+        data = json.load(f)
+    if data.get("coord_space") != "scene":
         print("  ERROR: saved calibration is not in scene-cam coord space. "
               "Recalibrate with 'c'.")
         return None
+    model = data["model"]
     mapper.load_state_dict({
-        "poly_coeffs_x": data["poly_coeffs_x"],
-        "poly_coeffs_y": data["poly_coeffs_y"],
+        "poly_coeffs_x": np.asarray(model["coeffs_x"]),
+        "poly_coeffs_y": np.asarray(model["coeffs_y"]),
+        "poly_degree": model.get("degree"),
     })
-    screen_size = None
-    scene_size = None
-    if "screen_width" in data.files and "screen_height" in data.files:
-        screen_size = (int(data["screen_width"]), int(data["screen_height"]))
-    if "scene_width" in data.files and "scene_height" in data.files:
-        scene_size = (int(data["scene_width"]), int(data["scene_height"]))
+    scene_size = tuple(data["scene_size"]) if data.get("scene_size") else None
+    screen_size = tuple(data["screen_size"]) if data.get("screen_size") else None
     age_hrs = (time.time() - float(data["timestamp"])) / 3600
     print(f"Calibration loaded (age: {age_hrs:.1f}h, scene={scene_size}).")
     if age_hrs > 24:
         print("  WARNING: Calibration is >24h old. Consider recalibrating.")
     return LoadedCalibration(age_hrs=age_hrs, scene_size=scene_size,
                              screen_size=screen_size)
+
+
+def _scene_intrinsics_snapshot() -> Optional[dict]:
+    """Inline copy of the current scene-cam intrinsics, or None if not yet
+    calibrated. Denormalized into each session so it stays interpretable even
+    if the central intrinsics file later changes."""
+    path = scene_intrinsics_path()
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        intr = json.load(f)
+    return {
+        "K": intr.get("K"),
+        "dist": intr.get("dist"),
+        "reproj_rms": intr.get("reproj_rms"),
+    }
+
+
+def write_session_metadata(session_dir: str,
+                           snapshot: CalibrationSnapshot,
+                           report: FitReport,
+                           degree: int) -> None:
+    """Emit `metadata.json` for a finished session: the self-contained dataset
+    record. Hardware/subject fields that the pipeline does not yet produce
+    (eye intrinsics, extrinsics, subject id, kappa, versions) are written as
+    null placeholders — the extrinsics jig and richer capture fill them later."""
+    sw, sh = snapshot.scene_size if snapshot.scene_size else (None, None)
+    pw, ph = snapshot.screen_size if snapshot.screen_size else (None, None)
+    eye_w, eye_h = EYE_CAM_RESOLUTION
+    aruco_dict_id = int(cv2.aruco.DICT_4X4_50) if hasattr(cv2, "aruco") else -1
+    meta = {
+        "session_id": os.path.basename(os.path.normpath(session_dir)),
+        "created_at": datetime.datetime.now().astimezone().isoformat(),
+        "timestamp": time.time(),
+        "phase": "calibration",
+        "subject_id": None,
+        "glasses": None,
+        "headset_model_version": None,
+        "kappa_deg": None,
+        "software": {"pupil_detector": None, "pye3d": None, "app_git_sha": None},
+        "screen": {"width": pw, "height": ph},
+        "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None},
+        "eye_cam": {"width": eye_w, "height": eye_h, "fps": None,
+                    "fov_deg": EYE_CAM_FOV_DEG, "identifier": None},
+        "aruco": {
+            "dict_name": ARUCO_DICT_NAME,
+            "dict_id": aruco_dict_id,
+            "marker_px": ARUCO_MARKER_PX,
+            "quiet_zone_px": ARUCO_QUIET_ZONE_PX,
+            "ids": list(ARUCO_IDS),
+            "screen_centers": _to_list(snapshot.aruco_screen_centers),
+        },
+        "rig_calibration_id": None,
+        "intrinsics": {"eye": None, "scene": _scene_intrinsics_snapshot()},
+        "extrinsics": None,
+        "fit": {
+            "degree": int(degree),
+            "n_points": int(report.n_points),
+            "loo_avg_px": float(report.loo_avg_err),
+            "loo_max_px": float(report.loo_max_err),
+        },
+    }
+    path = os.path.join(session_dir, "metadata.json")
+    with open(path, "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  Session metadata saved to {path}")
 
 
 def begin_session(root: Optional[str] = None) -> Tuple[str, str]:

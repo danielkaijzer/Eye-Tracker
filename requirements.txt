@@ -1,6 +1,11 @@
 numpy==2.2.6
 opencv-contrib-python==4.13.0.92
 
+# Dataset loading/analysis: glob per-session labels.csv into one frame and cache
+# a typed combined.parquet for training-time loads (scripts/eyetracker/dataset.py).
+pandas==2.2.3
+pyarrow==18.1.0
+
 # Pupil Labs 2D pupil detector — built from local clone.
 # System prereqs: `brew install eigen opencv` (already installed).
 # Build deps (scikit-build, cython) come from the package's pyproject.toml
