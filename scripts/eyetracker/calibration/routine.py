@@ -30,6 +30,7 @@ from scripts.eyetracker.calibration.persistence import (
     append_label_rows,
     begin_session,
     save_calibration,
+    write_session_metadata,
 )
 from scripts.eyetracker.calibration.targets import TargetPattern
 from scripts.eyetracker.config import ARUCO_IDS
@@ -383,7 +384,12 @@ class CalibrationRoutine:
         if report.loo_avg_err > err_threshold:
             print(f"  WARNING: High error (>{err_threshold:.0f}px at this "
                   "scene-cam resolution) — consider recalibrating.")
-        save_calibration(snapshot, self.mapper)
+        source_session = (os.path.basename(os.path.normpath(self.session_dir))
+                          if self.session_dir else None)
+        save_calibration(snapshot, self.mapper, source_session=source_session)
+        if self.session_dir is not None:
+            write_session_metadata(self.session_dir, snapshot, report,
+                                   self.mapper_degree)
         print("Calibration Complete!")
 
     def _end(self) -> None:

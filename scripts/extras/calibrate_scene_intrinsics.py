@@ -10,18 +10,19 @@ Workflow:
    distances and angles.
 4. Press C to compute calibration. Press R to clear captures. Q to quit.
 
-Output: scripts/eyetracker/scene_intrinsics.npz with K, dist, image_size,
-reproj_rms, timestamp. Use K[0,0] (fx) to convert pixel error to angular:
+Output: scripts/eyetracker/scene_intrinsics.json with K, dist, image_size,
+reproj_rms, timestamp. Use K[0][0] (fx) to convert pixel error to angular:
     angular_deg = degrees(atan(pixel_err / fx))
 """
 import argparse
+import json
 import math
 import sys
 import time
 
 import cv2
-import numpy as np
 
+from scripts.eyetracker.calibration.paths import scene_intrinsics_path
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import SCENE_REQUEST_HEIGHT, SCENE_REQUEST_WIDTH
 
@@ -34,7 +35,7 @@ MARKER_LEN = 0.75
 MIN_CORNERS_PER_FRAME = 8
 MIN_FRAMES_FOR_CALIBRATION = 10
 
-OUTPUT_PATH = "scripts/eyetracker/scene_intrinsics.npz"
+OUTPUT_PATH = scene_intrinsics_path()
 WINDOW_NAME = "calibrate_scene_intrinsics"
 
 
@@ -128,12 +129,15 @@ def main():
             )
             print(f"  reproj RMS: {rms:.4f} px")
             _print_K_summary(K, image_size)
-            np.savez(args.out,
-                     K=K, dist=dist,
-                     image_width=image_size[0],
-                     image_height=image_size[1],
-                     reproj_rms=rms,
-                     timestamp=time.time())
+            with open(args.out, "w") as f:
+                json.dump({
+                    "K": K.tolist(),
+                    "dist": dist.tolist(),
+                    "image_width": image_size[0],
+                    "image_height": image_size[1],
+                    "reproj_rms": float(rms),
+                    "timestamp": time.time(),
+                }, f, indent=2)
             print(f"  saved -> {args.out}")
             break
 

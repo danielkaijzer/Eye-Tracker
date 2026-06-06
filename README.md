@@ -45,6 +45,7 @@ scripts/eyetracker/         # Main Python package — `py -m scripts.eyetracker`
     scene/                  # ArUco detection and screen→scene homography
     gaze/                   # Polynomial mapper, 1€ smoother
     calibration/            # State machine, sample collector, persistence
+    dataset.py              # Load per-session labels into one frame (+ Parquet cache)
     display/                # Tk calibration overlay, cv2 windows
 
 scripts/extras/             # Standalone utilities
@@ -62,6 +63,7 @@ experimental/               # Paused / on-hold work, kept for reference
 docs/                       # Implementation notes, citations, architecture
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
     data_collection.md              # Fields the data-collection pipeline captures
+    dataset_format.md               # On-disk format for sessions + calibration artifacts
     citations/                      # references.bib + references.tex
     architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
 
