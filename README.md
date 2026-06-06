@@ -1,6 +1,6 @@
 # Eye Tracker
 
-A high-precision, low-latency eye tracker prototype. A head-mounted rig pairs an IR eye camera with a forward-facing scene camera. A Python pipeline detects the pupil, calibrates a polynomial mapping from pupil pixels to scene-camera pixels, and renders the gaze locally (OpenCV).
+A low-cost, high-precision, low-latency eye tracker prototype. A head-mounted rig pairs an IR eye camera with a forward-facing scene camera. A Python pipeline detects the pupil, calibrates a polynomial mapping from pupil pixels to scene-camera pixels, and renders the gaze locally (OpenCV).
 
 ## Install
 
