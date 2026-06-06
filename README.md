@@ -4,7 +4,7 @@ A high-precision, low-latency eye tracker prototype. A head-mounted rig pairs an
 
 ## Install
 
-**Python backend** (3.11+ recommended):
+**Python** (3.11+ recommended):
 
 ```
 brew install eigen opencv                       # macOS system deps for pupil-detectors
@@ -66,11 +66,11 @@ docs/                       # Implementation notes, citations, architecture
     architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
 
 data/                       # Recorded MP4s + per-session calibration dumps
-3d-files/                   # STLs for the headset mounts and calibration jig
-requirements.txt            # Python deps (Flask, OpenCV, numpy, pupil-detectors)
+3d-files/                   # STLs for the headset mounts
+requirements.txt            # Python deps (OpenCV, numpy, pupil-detectors)
 ```
 
-## Pipeline (current, as built)
+## Pipeline
 
 ```mermaid
 graph TD
@@ -79,7 +79,7 @@ graph TD
         SCN[Scene camera] --> CAP
     end
 
-    subgraph Backend ["Python (scripts/eyetracker)"]
+    subgraph Pipeline ["Python (scripts/eyetracker)"]
         CAP --> PD[Pupil Labs 2D detector + pye3d]
         PD --> GATE[Confidence + jump gates]
         GATE --> POLY[Polynomial gaze mapper]
@@ -87,11 +87,10 @@ graph TD
         ARUCO -. calibration only .-> CAL[Calibration routine<br/>screen→scene homography]
         CAL --> POLY
         POLY --> SMOOTH[1€ smoother]
-        SMOOTH --> OUT{Display}
     end
 
     subgraph Output
-        OUT -->|cv2 windows| CV[Local view]
+        SMOOTH -->|cv2 windows| CV[Display]
     end
 ```
 
