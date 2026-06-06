@@ -113,8 +113,6 @@ class PolynomialGazeMapper(GazeMapper):
     def load_state_dict(self, state: dict) -> None:
         cx = np.asarray(state["poly_coeffs_x"])
         cy = np.asarray(state["poly_coeffs_y"])
-        # Prefer explicit degree, fall back to inferring from coeff length
-        # so old npz files (no poly_degree field) still load correctly.
         degree = state.get("poly_degree")
         if degree is None:
             degree = next((d for d, k in _FEATURE_COUNT.items() if k == len(cx)), None)

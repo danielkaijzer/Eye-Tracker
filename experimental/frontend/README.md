@@ -2,7 +2,7 @@
 
 Next.js 16 / React 19 dashboard for the Eye Tracker project. Authenticates with Supabase, consumes MJPEG streams from the Python backend, and overlays live gaze (`GazeDot`) and session heatmaps (`HeatmapCanvas`).
 
-See the [root README](../README.md) for the full system overview and the [Figma wireframes](https://www.figma.com/design/WKvgVunFAci4GsTFlWHqsr/Opticore?node-id=0-1&p=f) for the intended UI.
+> **Status: PAUSED.** The project's active focus is the research pipeline and the desktop tracker; this dashboard is kept under `experimental/` for reference and is not currently maintained. The --web MJPEG backend it consumed has since been removed; reviving the dashboard means re-adding it.
 
 ## Install
 
@@ -33,7 +33,7 @@ npm run lint         # Next.js ESLint preset
 
 Open <http://localhost:3000>, sign up or log in, then click **Load Calibration** to reuse the most recent saved fit from the backend.
 
-## Backend dependency
+## Backend dependency (DEPRECATED)
 
 The dashboard expects the Python backend running in web mode in a separate terminal (from the repo root):
 

@@ -4,8 +4,6 @@ This is the only place that decides which concrete implementation of each
 ABC to use. Swap a class here (e.g. PolynomialGazeMapper -> TpsGazeMapper)
 and nothing else needs to change.
 """
-import argparse
-
 import cv2
 
 from scripts.eyetracker.app import App
@@ -43,7 +41,6 @@ from scripts.eyetracker.config import (
 from scripts.eyetracker.display.cv_display import CvDisplay
 from scripts.eyetracker.display.selection_gui import SelectionGui
 from scripts.eyetracker.display.tk_overlay import TkCalibrationOverlay
-from scripts.eyetracker.display.web_display import WebDisplay
 from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
 from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
@@ -63,7 +60,7 @@ def _scene_cam_settings() -> CameraSettings:
                           request_height=SCENE_REQUEST_HEIGHT)
 
 
-def _build_app(eye_index: int, web: bool = False) -> App:
+def _build_app(eye_index: int) -> App:
     eye_cam = OpenCVCamera(eye_index, _eye_cam_settings())
     scene_index = 1 if eye_index == 0 else 0
     scene_cam = OpenCVCamera(scene_index, _scene_cam_settings())
@@ -114,7 +111,7 @@ def _build_app(eye_index: int, web: bool = False) -> App:
         quick_routine=quick_routine,
         detailed_routine=detailed_routine,
         overlay=TkCalibrationOverlay(target_mapper=target_mapper),
-        display=WebDisplay() if web else CvDisplay(with_scene=True),
+        display=CvDisplay(with_scene=True),
     )
 
 
@@ -158,13 +155,6 @@ def _run_video(path: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="scripts.eyetracker")
-    parser.add_argument(
-        "--web", action="store_true",
-        help="Stream annotated frames over HTTP (MJPEG) instead of "
-             "opening cv2.imshow windows. See display/web_display.py.",
-    )
-    args = parser.parse_args()
 
     cameras = detect_cameras()
     result = SelectionGui().pick(cameras)
@@ -172,7 +162,7 @@ def main() -> None:
         return
     kind, val = result
     if kind == "camera":
-        _build_app(int(val), web=args.web).run()
+        _build_app(int(val)).run()
     elif kind == "video":
         _run_video(str(val))
 

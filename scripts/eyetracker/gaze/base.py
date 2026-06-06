@@ -1,6 +1,6 @@
 """GazeMapper interface — pluggable pupil-pixel -> scene-cam-pixel mapper.
 
-Today's only implementation is `PolynomialGazeMapper` (2nd-degree bivariate
+Today's only implementation is `PolynomialGazeMapper` (2nd or 3rd degree bivariate
 polynomial). Future candidates: thin-plate spline, weighted least-squares.
 """
 from abc import ABC, abstractmethod

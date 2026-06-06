@@ -1,15 +1,4 @@
 """Calibration .npz save/load + per-session dir + labels.csv header.
-
-The .npz schema is intentionally compatible with what the legacy single-file
-script wrote:
-
-  poly_coeffs_x, poly_coeffs_y, vectors, scene_points, screen_points,
-  coord_space="scene", scene_width, scene_height, screen_width, screen_height,
-  aruco_dict_id, aruco_dict_name, aruco_marker_px, aruco_quiet_zone_px,
-  aruco_screen_centers, timestamp
-
-Old history files used `all_points` (screen-space). We treat any history file
-without `all_scene_points` as fresh so the two coord spaces don't get mixed.
 """
 import csv
 import os
