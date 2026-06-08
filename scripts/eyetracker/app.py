@@ -115,10 +115,6 @@ class App:
                     scene_frame=self.last_scene_frame,
                     confidence=self.last_confidence,
                 )
-            if was_calibration_active and not self.routine.is_active:
-                self.overlay.close()
-                # Reset the gaze smoother so the new fit starts clean.
-                self.smoother.reset()
 
             if self.scene_cam is not None:
                 ext_frame = self.scene_cam.read()
@@ -140,6 +136,18 @@ class App:
             key = tk_key or cv_key
             if not self._handle_key(key, raw):
                 break
+
+            # A calibration session can end either inside tick() above (the last
+            # point was captured) or inside _handle_key() just above (the user
+            # skipped the last point, which runs _finish()). Check the
+            # active->inactive transition after both so the overlay is always
+            # closed. Missing the skip-to-finish case leaves the Tk window
+            # frozen open — and a later restart then spawns a second Tk root,
+            # which is the "image pyimageN doesn't exist" crash.
+            if was_calibration_active and not self.routine.is_active:
+                self.overlay.close()
+                # Reset the gaze smoother so the new fit starts clean.
+                self.smoother.reset()
 
     # ---- per-stage helpers --------------------------------------------------
 
