@@ -24,10 +24,35 @@ EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
 
 HIGH_FPS_MODE = False
 
+# Exposure (see "Exposure controls" below). Manual by default so the IR-lit
+# pupil stays at a fixed brightness instead of the sensor hunting.
+EYE_AUTO_EXPOSURE = False
+# USB vendor:product for the uvc-util exposure path (Sonix GC0308).
+EYE_UVC_ID = "0x0c45:0x6366"
+EYE_GAIN = None  # None = leave at device default; tune live with [ / ]
+
 
 # ---- Scene camera ------------------------------------------------------------
 SCENE_REQUEST_WIDTH = 1920
 SCENE_REQUEST_HEIGHT = 1080
+
+# Pin the scene exposure (auto-exposure off) by default so the frame doesn't
+# drift as the user looks around — auto-exposure shifts the whole image and
+# throws off the ArUco/gaze mapping. Toggle back to auto in-app with 'a'.
+SCENE_AUTO_EXPOSURE = False
+# USB vendor:product for the uvc-util exposure path (Realtek OV5640).
+SCENE_UVC_ID = "0x0bda:0xd565"
+SCENE_GAIN = None
+
+
+# ---- Exposure controls -------------------------------------------------------
+# OpenCV/AVFoundation can't set exposure on macOS, so we shell out to uvc-util
+# (jtfrey/uvc-util), selecting cameras by the *_UVC_ID above. Build it and put
+# it on PATH or set UVC_UTIL_PATH (see requirements.txt). On the current modules
+# exposure-time is a cosmetic no-op, so GAIN is the brightness lever and
+# auto-exposure-mode is the on/off switch. EXPOSURE_STEP is the per-keypress
+# gain nudge for the '[' / ']' hotkeys.
+EXPOSURE_STEP = 1.0
 
 
 # ---- Display window ----------------------------------------------------------
