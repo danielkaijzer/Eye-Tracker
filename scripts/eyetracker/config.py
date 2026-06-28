@@ -24,35 +24,33 @@ EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
 
 HIGH_FPS_MODE = False
 
-# Exposure (see "Exposure controls" below). Manual by default so the IR-lit
-# pupil stays at a fixed brightness instead of the sensor hunting.
-EYE_AUTO_EXPOSURE = False
-# USB vendor:product for the uvc-util exposure path (Sonix GC0308).
-EYE_UVC_ID = "0x0c45:0x6366"
-EYE_GAIN = None  # None = leave at device default; tune live with [ / ]
+# The eye camera's exposure isn't driven from the app: its auto-exposure runs
+# internally on the sensor/bridge and can't be disabled over UVC, and the
+# IR-lit pupil doesn't need exposure control. Poke its gain from the terminal if
+# ever needed — see docs/uvc_exposure_cheatsheet.md (id 0x0c45:0x6366).
 
 
 # ---- Scene camera ------------------------------------------------------------
 SCENE_REQUEST_WIDTH = 1920
 SCENE_REQUEST_HEIGHT = 1080
 
-# Pin the scene exposure (auto-exposure off) by default so the frame doesn't
-# drift as the user looks around — auto-exposure shifts the whole image and
-# throws off the ArUco/gaze mapping. Toggle back to auto in-app with 'a'.
-SCENE_AUTO_EXPOSURE = False
-# USB vendor:product for the uvc-util exposure path (Realtek OV5640).
+# USB vendor:product for the uvc-util exposure path (Realtek OV5640). The scene
+# cam is manual-only and `exposure-time-abs` genuinely drives sensor integration
+# time (range 1-10000). SCENE_EXPOSURE is the initial value applied at startup;
+# None leaves the device default.
 SCENE_UVC_ID = "0x0bda:0xd565"
-SCENE_GAIN = None
+SCENE_EXPOSURE = None
 
 
 # ---- Exposure controls -------------------------------------------------------
 # OpenCV/AVFoundation can't set exposure on macOS, so we shell out to uvc-util
-# (jtfrey/uvc-util), selecting cameras by the *_UVC_ID above. Build it and put
-# it on PATH or set UVC_UTIL_PATH (see requirements.txt). On the current modules
-# exposure-time is a cosmetic no-op, so GAIN is the brightness lever and
-# auto-exposure-mode is the on/off switch. EXPOSURE_STEP is the per-keypress
-# gain nudge for the '[' / ']' hotkeys.
-EXPOSURE_STEP = 1.0
+# (jtfrey/uvc-util), selecting the scene cam by SCENE_UVC_ID above. Build it and
+# put it on PATH or set UVC_UTIL_PATH (see requirements.txt).
+#
+# Two nudge sizes for the '[' / ']' (fine) and '{' / '}' (coarse) hotkeys, each
+# a fraction of the exposure-time range (1-10000): fine ≈ 10 units, coarse ≈ 500.
+EXPOSURE_STEP_FINE = 0.001
+EXPOSURE_STEP_COARSE = 0.05
 
 
 # ---- Display window ----------------------------------------------------------

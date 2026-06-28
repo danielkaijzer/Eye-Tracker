@@ -7,7 +7,7 @@ alongside the live capture stream. See UvcExposureController and the
 project_macos_uvc_exposure memory.
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -26,13 +26,14 @@ class CameraSettings:
     request_height: Optional[int] = None
     request_fps: Optional[int] = None
     flip_vertical: bool = False
-    # Exposure control (macOS, via uvc-util). uvc_id is the USB "vendor:product"
-    # (e.g. "0x0c45:0x6366") used to select the camera. auto_exposure sets the
-    # initial mode (False = manual, the AEC-off state); gain is the manual
-    # brightness lever (None leaves the device default).
+    # Manual exposure control (macOS, via uvc-util). uvc_id is the USB
+    # "vendor:product" (e.g. "0x0bda:0xd565") used to select the camera;
+    # exposure_control names the UVC control to drive as the lever; exposure is
+    # its initial value (None leaves the device default). Leave uvc_id None for
+    # cameras the app doesn't drive exposure on.
     uvc_id: Optional[str] = None
-    auto_exposure: Optional[bool] = None
-    gain: Optional[int] = None
+    exposure_control: str = "exposure-time-abs"
+    exposure: Optional[int] = None
 
 
 class OpenCVCamera(CameraSource):
@@ -80,28 +81,20 @@ class OpenCVCamera(CameraSource):
     # ---- exposure control (uvc-util) ----------------------------------------
 
     def _init_uvc_exposure(self, s: CameraSettings) -> None:
-        controller = UvcExposureController(s.uvc_id, find_uvc_util())
+        controller = UvcExposureController(s.uvc_id, find_uvc_util(),
+                                           control=s.exposure_control)
         if controller.probe():
-            controller.apply_initial(s.auto_exposure, s.gain)
+            controller.apply_initial(s.exposure)
             self._uvc = controller
         else:
             print(f"[exposure] cam {self.index}: no exposure control "
                   f"(uvc-util missing or device {s.uvc_id} not found). Build "
                   "uvc-util and put it on PATH or set UVC_UTIL_PATH.")
 
-    def set_auto_exposure(self, auto: bool) -> bool:
-        return self._uvc.set_auto(auto) if self._uvc is not None else False
-
-    def set_exposure(self, exposure: float) -> bool:
-        # The wired manual lever on these modules is gain (exposure-time is a
-        # cosmetic no-op), so the manual "exposure" value maps to gain.
-        return self._uvc.set_gain(int(exposure)) if self._uvc is not None else False
-
-    def get_exposure_settings(self) -> Tuple[Optional[bool], Optional[float]]:
+    def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
         if self._uvc is None:
-            return (None, None)
-        auto, gain = self._uvc.state()
-        return (auto, float(gain) if gain is not None else None)
+            return False
+        return self._uvc.nudge_exposure(direction, step_fraction)
 
     def exposure_status(self) -> Optional[str]:
         return self._uvc.status_str() if self._uvc is not None else None

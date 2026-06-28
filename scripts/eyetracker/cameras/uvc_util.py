@@ -3,11 +3,19 @@
 Why this exists: OpenCV's AVFoundation backend can't drive UVC exposure on
 macOS — set() no-ops and get() returns 0. uvc-util sends UVC class requests
 over IOKit *independently* of the capture session, so it works while OpenCV is
-streaming. On the rig's modules `exposure-time-abs` turned out to be a cosmetic
-no-op (writes are accepted but never reach the sensor), while `gain` and
-`auto-exposure-mode` are genuinely wired — so gain is the brightness lever here
-and auto-exposure-mode=1 is the "stop auto-exposure" switch. See the
-project_macos_uvc_exposure memory.
+streaming.
+
+Scope: this drives the **scene camera's** manual exposure only. The scene module
+(Realtek OV5640) is manual-only and its real brightness lever is
+`exposure-time-abs` (gain just scales output luminance). The eye module's
+exposure runs internally on the sensor and isn't controllable over UVC, so the
+app doesn't drive it — poke it from the terminal if needed
+(docs/uvc_exposure_cheatsheet.md). The controller stays parameterized on the
+control name so it isn't hard-wired to one cam.
+
+Gotcha this defends against: uvc-util's `-s` (set) returns exit 0 even when the
+device silently ignores or clamps the write, so every set is confirmed with a
+read-back.
 
 The binary is found via (in order): explicit path arg, UVC_UTIL_PATH env var,
 PATH, then common Homebrew/usr-local locations. Build it once with the Xcode
@@ -35,27 +43,29 @@ def find_uvc_util(explicit: Optional[str] = None) -> Optional[str]:
     return None
 
 
-# UVC auto-exposure-mode is an 8-bit bitmap: 1=manual, 2=auto, 4=shutter-priority,
-# 8=aperture-priority. Devices implement a subset; the rig cams support {1, 8}.
+# auto-exposure-mode bitmap value for manual exposure. We force this at probe so
+# the manual lever actually drives the sensor.
 _MANUAL_MODE = 1
-_DEFAULT_AUTO_MODE = 8  # fallback only; the real auto value is read per-device.
 
 
 class UvcExposureController:
-    """Drives one camera's exposure via uvc-util, selecting it by USB
-    vendor:product (e.g. "0x0c45:0x6366"). Selecting by id rather than index
-    keeps it stable across replug / enumeration order."""
+    """Drives one camera's manual exposure via uvc-util, selecting it by USB
+    vendor:product (e.g. "0x0bda:0xd565"). Selecting by id rather than index
+    keeps it stable across replug / enumeration order.
 
-    def __init__(self, uvc_id: str, binary: Optional[str]):
+    `control` names the UVC control used as the manual exposure lever
+    (default "exposure-time-abs")."""
+
+    def __init__(self, uvc_id: str, binary: Optional[str],
+                 control: str = "exposure-time-abs"):
         self.uvc_id = uvc_id
         self.binary = binary
+        self.control = control                 # manual lever (UVC control name)
         self._sel = f"--select-by-vendor-and-product-id={uvc_id}"
         self.ok = False
-        self._auto: Optional[bool] = None     # last commanded auto state
-        self._auto_mode = _DEFAULT_AUTO_MODE   # device's "auto" mode value
-        self._gain: Optional[int] = None
-        self._gain_min = 0
-        self._gain_max = 100
+        self._value: Optional[int] = None      # last commanded value of `control`
+        self._value_min = 0
+        self._value_max = 0
 
     # ---- process plumbing ---------------------------------------------------
 
@@ -70,7 +80,7 @@ class UvcExposureController:
         return done.stdout if done.returncode == 0 else None
 
     def _get_int(self, control: str) -> Optional[int]:
-        out = self._run("-o", control)
+        out = self._run("-g", control)
         if out is None:
             return None
         match = re.search(r"-?\d+", out)
@@ -85,66 +95,60 @@ class UvcExposureController:
         return (int(lo.group(1)) if lo else None,
                 int(hi.group(1)) if hi else None)
 
+    def _set_verified(self, control: str, value: int) -> Optional[int]:
+        """Write a control and confirm it took. uvc-util reports success even
+        when the device ignores or clamps the write, so we read the value back.
+        Returns the value the device actually holds (which may differ from the
+        request if it snapped/clamped), or None if the write or read failed."""
+        if self._run("-s", f"{control}={value}") is None:
+            return None
+        return self._get_int(control)
+
     # ---- lifecycle ----------------------------------------------------------
 
     def probe(self) -> bool:
-        """Confirm the device is reachable and learn its auto-mode value and
-        gain range. Returns False if uvc-util or the device is unavailable."""
+        """Confirm the device is reachable, force manual exposure, and read the
+        lever's range + current value. Returns False if uvc-util or the device
+        is unavailable."""
         if not self.binary:
             return False
-        mode = self._get_int("auto-exposure-mode")
-        if mode is None:
+        lo, hi = self._get_range(self.control)
+        if lo is None or hi is None:
             return False
-        if mode != _MANUAL_MODE:
-            # Whatever non-manual mode it's in now is its "auto" — remember it
-            # so toggling back to auto restores the right value.
-            self._auto_mode = mode
-        self._auto = (mode == self._auto_mode)
-        self._gain = self._get_int("gain")
-        lo, hi = self._get_range("gain")
-        if lo is not None and hi is not None:
-            self._gain_min, self._gain_max = lo, hi
+        self._value_min, self._value_max = lo, hi
+        self._set_verified("auto-exposure-mode", _MANUAL_MODE)
+        self._value = self._get_int(self.control)
         self.ok = True
         return True
 
-    def apply_initial(self, auto: Optional[bool], gain: Optional[int]) -> None:
-        if auto is not None:
-            self.set_auto(auto)
-        if gain is not None and auto is not True:
-            self.set_gain(gain)
+    def apply_initial(self, value: Optional[int]) -> None:
+        if value is not None:
+            self.set_exposure(value)
 
     # ---- controls -----------------------------------------------------------
 
-    def set_auto(self, auto: bool) -> bool:
-        mode = self._auto_mode if auto else _MANUAL_MODE
-        if self._run("-s", f"auto-exposure-mode={mode}") is None:
+    def set_exposure(self, value: int) -> bool:
+        value = int(max(self._value_min, min(self._value_max, value)))
+        got = self._set_verified(self.control, value)
+        if got is None:
             return False
-        self._auto = auto
-        # Re-assert gain when returning to manual, in case it drifted.
-        if not auto and self._gain is not None:
-            self._run("-s", f"gain={self._gain}")
+        self._value = got
         return True
 
-    def set_gain(self, value: int) -> bool:
-        value = max(self._gain_min, min(self._gain_max, int(value)))
-        # Gain only sticks in manual mode.
-        if self._auto is not False:
-            if self._run("-s", f"auto-exposure-mode={_MANUAL_MODE}") is None:
-                return False
-            self._auto = False
-        if self._run("-s", f"gain={value}") is None:
+    def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
+        """Step the lever by a fraction of its range (direction +1/-1). A
+        fraction keeps the feel consistent across controls whose ranges differ
+        by orders of magnitude (exposure-time ~1..10000 vs gain ~0..128)."""
+        if self._value is None:
             return False
-        self._gain = value
-        return True
+        span = self._value_max - self._value_min
+        step = max(1, round(span * step_fraction))
+        return self.set_exposure(self._value + direction * step)
 
     # ---- readout ------------------------------------------------------------
 
-    def state(self) -> Tuple[Optional[bool], Optional[int]]:
-        return (self._auto, self._gain)
-
     def status_str(self) -> str:
-        if self._auto:
-            return "auto"
-        if self._gain is not None:
-            return f"gain {self._gain}"
-        return "manual"
+        if self._value is None:
+            return "manual"
+        label = "exp" if self.control == "exposure-time-abs" else self.control
+        return f"{label} {self._value}"

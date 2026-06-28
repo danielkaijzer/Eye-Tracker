@@ -31,15 +31,11 @@ from scripts.eyetracker.config import (
     CALIB_STD_THRESH,
     CALIB_WARMUP,
     CONF_THRESH,
-    EYE_AUTO_EXPOSURE,
     EYE_CAM_FOCAL_LENGTH_PX,
-    EYE_GAIN,
-    EYE_UVC_ID,
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
     PUPIL_JUMP_THRESH,
-    SCENE_AUTO_EXPOSURE,
-    SCENE_GAIN,
+    SCENE_EXPOSURE,
     SCENE_REQUEST_HEIGHT,
     SCENE_REQUEST_WIDTH,
     SCENE_UVC_ID,
@@ -55,20 +51,17 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 
 def _eye_cam_settings() -> CameraSettings:
-    exposure = dict(uvc_id=EYE_UVC_ID, auto_exposure=EYE_AUTO_EXPOSURE,
-                    gain=EYE_GAIN, flip_vertical=True)
     if HIGH_FPS_MODE:
         return CameraSettings(request_width=320, request_height=240,
-                              request_fps=120, **exposure)
-    return CameraSettings(**exposure)
+                              request_fps=120, flip_vertical=True)
+    return CameraSettings(flip_vertical=True)
 
 
 def _scene_cam_settings() -> CameraSettings:
     return CameraSettings(request_width=SCENE_REQUEST_WIDTH,
                           request_height=SCENE_REQUEST_HEIGHT,
                           uvc_id=SCENE_UVC_ID,
-                          auto_exposure=SCENE_AUTO_EXPOSURE,
-                          gain=SCENE_GAIN)
+                          exposure=SCENE_EXPOSURE)
 
 
 def _build_app(eye_index: int) -> App:

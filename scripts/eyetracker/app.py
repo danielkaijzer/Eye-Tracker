@@ -23,7 +23,7 @@ from scripts.eyetracker.gaze.base import GazeMapper
 from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.base import PupilDetector
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
-from scripts.eyetracker.config import EXPOSURE_STEP
+from scripts.eyetracker.config import EXPOSURE_STEP_COARSE, EXPOSURE_STEP_FINE
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 
@@ -68,8 +68,6 @@ class App:
         self.last_eye_frame: Optional[np.ndarray] = None
         self.last_scene_frame: Optional[np.ndarray] = None
         self._last_gate_log_ts: float = 0.0
-        # Which camera the exposure hotkeys ('a', '[', ']') currently target.
-        self._exposure_target: str = "eye"
 
     # ---- entry point --------------------------------------------------------
 
@@ -92,8 +90,8 @@ class App:
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
               "'l' = load calibration, 'r' = reset pupil 3D model, "
               "'q' = quit, space = pause")
-        print("Exposure: 'e' = switch target cam (eye/scene), 'a' = toggle "
-              "auto, '[' / ']' = darker / brighter (manual)")
+        print("Scene exposure: '[' / ']' = darker / brighter (fine), "
+              "'{' / '}' = darker / brighter (coarse)")
 
         try:
             self._loop()
@@ -243,57 +241,31 @@ class App:
         elif key == 'r':
             self.pupil.reset()
             print("Pupil 3D model reset — give it ~30s to reconverge.")
-        elif key == 'e':
-            self._cycle_exposure_target()
-        elif key == 'a':
-            self._toggle_auto_exposure()
         elif key == '[':
-            self._nudge_exposure(-EXPOSURE_STEP)
+            self._nudge_exposure(-1, EXPOSURE_STEP_FINE)
         elif key == ']':
-            self._nudge_exposure(EXPOSURE_STEP)
+            self._nudge_exposure(+1, EXPOSURE_STEP_FINE)
+        elif key == '{':
+            self._nudge_exposure(-1, EXPOSURE_STEP_COARSE)
+        elif key == '}':
+            self._nudge_exposure(+1, EXPOSURE_STEP_COARSE)
         return True
 
-    # ---- exposure controls --------------------------------------------------
+    # ---- exposure controls (scene cam only) ---------------------------------
 
-    def _active_exposure_cam(self) -> CameraSource:
-        if self._exposure_target == "scene" and self.scene_cam is not None:
-            return self.scene_cam
-        return self.eye_cam
-
-    def _cycle_exposure_target(self) -> None:
+    def _nudge_exposure(self, direction: int, step_fraction: float) -> None:
         if self.scene_cam is None:
-            self._exposure_target = "eye"
-        else:
-            self._exposure_target = (
-                "scene" if self._exposure_target == "eye" else "eye")
-        print(f"[exposure] target cam: {self._exposure_target}")
-
-    def _toggle_auto_exposure(self) -> None:
-        cam = self._active_exposure_cam()
-        auto, _ = cam.get_exposure_settings()
-        if not cam.set_auto_exposure(not bool(auto)):
-            print(f"[exposure] {self._exposure_target} cam has no exposure control")
-
-    def _nudge_exposure(self, delta: float) -> None:
-        cam = self._active_exposure_cam()
-        _, exposure = cam.get_exposure_settings()
-        base = exposure if exposure is not None else 0.0
-        if not cam.set_exposure(base + delta):
-            print(f"[exposure] {self._exposure_target} cam has no exposure control")
+            return
+        if not self.scene_cam.nudge_exposure(direction, step_fraction):
+            print("[exposure] scene cam has no exposure control")
 
     def _exposure_overlay_text(self) -> str:
-        """One-line summary of each cam's exposure state; '*' marks the camera
-        the hotkeys currently target. Empty for cams with no exposure control."""
-        parts = []
-        for name, cam in (("eye", self.eye_cam), ("scene", self.scene_cam)):
-            if cam is None:
-                continue
-            state = cam.exposure_status()
-            if state is None:
-                continue
-            marker = "*" if name == self._exposure_target else ""
-            parts.append(f"{marker}{name}:{state}")
-        return "  ".join(parts)
+        """One-line summary of the scene cam's exposure state, or empty if it
+        has no exposure control."""
+        if self.scene_cam is None:
+            return ""
+        state = self.scene_cam.exposure_status()
+        return f"scene:{state}" if state is not None else ""
 
     def _handle_load(self) -> None:
         load_calibration_state(self.mapper)

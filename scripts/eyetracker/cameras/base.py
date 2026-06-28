@@ -1,6 +1,6 @@
 """CameraSource interface — frame providers for the App loop."""
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
@@ -30,20 +30,13 @@ class CameraSource(ABC):
     # recorded-video source) keep the no-op defaults so the App can call them
     # unconditionally without knowing the concrete type.
 
-    def set_auto_exposure(self, auto: bool) -> bool:
-        """Turn auto-exposure on/off at runtime. Return True if applied."""
+    def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
+        """Step the manual exposure by a fraction of its range (direction +1/-1).
+        Fractional so it feels consistent regardless of the underlying control's
+        scale. Return True if applied."""
         return False
-
-    def set_exposure(self, exposure: float) -> bool:
-        """Set a manual exposure value (implies auto off). Return True if applied."""
-        return False
-
-    def get_exposure_settings(self) -> Tuple[Optional[bool], Optional[float]]:
-        """Currently-commanded (auto_exposure, exposure). (None, None) if the
-        source has no exposure control."""
-        return (None, None)
 
     def exposure_status(self) -> Optional[str]:
-        """Short human label for the on-screen readout (e.g. "gain 40",
-        "auto"). None lets the caller format from get_exposure_settings()."""
+        """Short human label for the on-screen readout (e.g. "exp 400"), or None
+        if the source has no exposure control."""
         return None
