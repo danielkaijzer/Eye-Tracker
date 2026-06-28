@@ -13,3 +13,16 @@ pyarrow==18.1.0
 # Not editable: scikit-build skips the CMake C++ build on `-e` installs, so
 # the compiled .so never lands in site-packages. Plain install compiles it.
 /Users/danielkaijzer/src/pupil-detectors
+
+# uvc-util — macOS UVC exposure control (NOT a pip package; a CLI binary).
+# OpenCV/AVFoundation can't set camera exposure on macOS, so the app shells out
+# to uvc-util to drive gain / auto-exposure-mode (scripts/eyetracker/cameras/
+# uvc_util.py). Without it the app still runs, just with no exposure control.
+# System prereqs: Xcode Command Line Tools (`xcode-select --install`).
+# Build from source and put the binary on PATH (or set UVC_UTIL_PATH to it):
+#   git clone https://github.com/jtfrey/uvc-util.git
+#   cd uvc-util/src
+#   gcc -o uvc-util -framework IOKit -framework Foundation \
+#       -Wno-error=implicit-function-declaration -Wno-deprecated-declarations \
+#       uvc-util.m UVCController.m UVCType.m UVCValue.m
+#   cp uvc-util /opt/homebrew/bin/        # or anywhere on PATH

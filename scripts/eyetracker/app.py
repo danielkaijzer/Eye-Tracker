@@ -23,10 +23,17 @@ from scripts.eyetracker.gaze.base import GazeMapper
 from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.base import PupilDetector
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
+from scripts.eyetracker.config import EXPOSURE_STEP_COARSE, EXPOSURE_STEP_FINE
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 
 _GATE_LOG_THROTTLE_S = 1.0
+
+# A live USB eye cam occasionally drops a frame (read() returns None) without
+# being gone for good — the eye module's bridge is flaky. Tolerate a burst of
+# consecutive failures before declaring the stream dead, so one hiccup doesn't
+# silently end the whole session. ~100 frames ≈ a couple seconds of dead stream.
+_MAX_EYE_READ_FAILURES = 100
 
 
 class App:
@@ -89,6 +96,8 @@ class App:
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
               "'l' = load calibration, 'r' = reset pupil 3D model, "
               "'q' = quit, space = pause")
+        print("Scene exposure: '[' / ']' = darker / brighter (fine), "
+              "'{' / '}' = darker / brighter (coarse)")
 
         try:
             self._loop()
@@ -100,10 +109,24 @@ class App:
             self.display.close()
 
     def _loop(self) -> None:
+        consecutive_read_failures = 0
         while True:
             eye_frame = self.eye_cam.read()
             if eye_frame is None:
-                break
+                # Don't treat a single dropped frame as end-of-stream — that
+                # exits the app mid-session and looks like a mysterious crash.
+                # Skip the frame and keep going; only give up after a sustained
+                # outage (camera actually unplugged/dead).
+                consecutive_read_failures += 1
+                if consecutive_read_failures >= _MAX_EYE_READ_FAILURES:
+                    print(f"[camera] eye cam returned no frame "
+                          f"{consecutive_read_failures}x in a row — stopping.")
+                    break
+                if consecutive_read_failures == 1:
+                    print("[camera] eye cam dropped a frame; retrying…")
+                time.sleep(0.01)
+                continue
+            consecutive_read_failures = 0
 
             self._process_eye_frame(eye_frame)
 
@@ -193,6 +216,11 @@ class App:
                     print(f"[gate] reject: {reject_reason}")
                     self._last_gate_log_ts = now
 
+        exposure_text = self._exposure_overlay_text()
+        if exposure_text:
+            cv2.putText(frame, exposure_text, (10, 38),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1)
+
         self.display.show_eye(frame)
 
     def _predict_gaze_scene_xy(self) -> Optional[tuple]:
@@ -233,7 +261,31 @@ class App:
         elif key == 'r':
             self.pupil.reset()
             print("Pupil 3D model reset — give it ~30s to reconverge.")
+        elif key == '[':
+            self._nudge_exposure(-1, EXPOSURE_STEP_FINE)
+        elif key == ']':
+            self._nudge_exposure(+1, EXPOSURE_STEP_FINE)
+        elif key == '{':
+            self._nudge_exposure(-1, EXPOSURE_STEP_COARSE)
+        elif key == '}':
+            self._nudge_exposure(+1, EXPOSURE_STEP_COARSE)
         return True
+
+    # ---- exposure controls (scene cam only) ---------------------------------
+
+    def _nudge_exposure(self, direction: int, step_fraction: float) -> None:
+        if self.scene_cam is None:
+            return
+        if not self.scene_cam.nudge_exposure(direction, step_fraction):
+            print("[exposure] scene cam has no exposure control")
+
+    def _exposure_overlay_text(self) -> str:
+        """One-line summary of the scene cam's exposure state, or empty if it
+        has no exposure control."""
+        if self.scene_cam is None:
+            return ""
+        state = self.scene_cam.exposure_status()
+        return f"scene:{state}" if state is not None else ""
 
     def _handle_load(self) -> None:
         load_calibration_state(self.mapper)

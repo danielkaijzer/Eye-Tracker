@@ -4,7 +4,14 @@ This is the only place that decides which concrete implementation of each
 ABC to use. Swap a class here (e.g. PolynomialGazeMapper -> TpsGazeMapper)
 and nothing else needs to change.
 """
+import faulthandler
+
 import cv2
+
+# Dump a Python-level stack to stderr on a fatal signal (segfault/abort). The
+# pupil_detectors/pye3d C extensions can crash the process with no traceback;
+# this makes the next such crash show exactly where it died. Harmless otherwise.
+faulthandler.enable()
 
 from scripts.eyetracker.app import App
 from scripts.eyetracker.calibration.collector import SampleCollector
@@ -35,8 +42,10 @@ from scripts.eyetracker.config import (
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
     PUPIL_JUMP_THRESH,
+    SCENE_EXPOSURE,
     SCENE_REQUEST_HEIGHT,
     SCENE_REQUEST_WIDTH,
+    SCENE_UVC_ID,
 )
 from scripts.eyetracker.display.cv_display import CvDisplay
 from scripts.eyetracker.display.selection_gui import SelectionGui
@@ -51,13 +60,15 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 def _eye_cam_settings() -> CameraSettings:
     if HIGH_FPS_MODE:
         return CameraSettings(request_width=320, request_height=240,
-                              request_fps=120, exposure=-5, flip_vertical=True)
-    return CameraSettings(exposure=-5, flip_vertical=True)
+                              request_fps=120, flip_vertical=True)
+    return CameraSettings(flip_vertical=True)
 
 
 def _scene_cam_settings() -> CameraSettings:
     return CameraSettings(request_width=SCENE_REQUEST_WIDTH,
-                          request_height=SCENE_REQUEST_HEIGHT)
+                          request_height=SCENE_REQUEST_HEIGHT,
+                          uvc_id=SCENE_UVC_ID,
+                          exposure=SCENE_EXPOSURE)
 
 
 def _build_app(eye_index: int) -> App:

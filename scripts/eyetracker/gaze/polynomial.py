@@ -6,6 +6,9 @@ degree 3 (10 coeffs: degree-2 + [x^3, y^3, x^2 y, x y^2]).
 Two independent least-squares fits — one for scene_x, one for scene_y.
 LOO error = leave-one-out reprojection error in scene-cam pixels;
 per-point LOO errors are returned for two-pass recapture logic.
+
+TODO: Small efficiency add: use the hat-matrix identity, where LOO residual = ordinary residual / (1 − hᵢᵢ) 
+    instead of refitting from scratch in a loop
 """
 import math
 from typing import Optional
@@ -77,15 +80,7 @@ class PolynomialGazeMapper(GazeMapper):
         self.coeffs_y = cy
 
         errors = np.zeros(n)
-        for i in range(n):
-            A_loo = np.delete(A, i, axis=0)
-            bx_loo = np.delete(bx, i)
-            by_loo = np.delete(by, i)
-            cx_loo, _, _, _ = np.linalg.lstsq(A_loo, bx_loo, rcond=None)
-            cy_loo, _, _, _ = np.linalg.lstsq(A_loo, by_loo, rcond=None)
-            pred_x = A[i] @ cx_loo
-            pred_y = A[i] @ cy_loo
-            errors[i] = math.sqrt((pred_x - bx[i]) ** 2 + (pred_y - by[i]) ** 2)
+         
 
         return FitReport(n_points=n,
                          loo_avg_err=float(np.mean(errors)),
