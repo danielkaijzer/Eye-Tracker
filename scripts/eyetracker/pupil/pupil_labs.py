@@ -44,8 +44,15 @@ class PupilLabsDetector(PupilDetector):
             return None
         ell = result_3d["ellipse"]
         cx, cy = ell["center"]
+        axes = ell["axes"]
+        angle = ell["angle"]
+        # A poor/degenerate fit can return confidence > 0 with non-finite ellipse
+        # params. Treat that as no detection rather than letting NaN propagate
+        # into int(round(...)) here (ValueError) or cv2.ellipse downstream.
+        if not all(np.isfinite(v) for v in (cx, cy, axes[0], axes[1], angle)):
+            return None
         center_int = (int(round(cx)), int(round(cy)))
-        ellipse_tuple = ((cx, cy), ell["axes"], ell["angle"])
+        ellipse_tuple = ((cx, cy), axes, angle)
         return PupilSample(center=center_int, ellipse=ellipse_tuple, confidence=conf)
 
     def reset(self) -> None:

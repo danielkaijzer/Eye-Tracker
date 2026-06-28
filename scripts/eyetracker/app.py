@@ -29,6 +29,12 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 _GATE_LOG_THROTTLE_S = 1.0
 
+# A live USB eye cam occasionally drops a frame (read() returns None) without
+# being gone for good — the eye module's bridge is flaky. Tolerate a burst of
+# consecutive failures before declaring the stream dead, so one hiccup doesn't
+# silently end the whole session. ~100 frames ≈ a couple seconds of dead stream.
+_MAX_EYE_READ_FAILURES = 100
+
 
 class App:
     def __init__(self,
@@ -103,10 +109,24 @@ class App:
             self.display.close()
 
     def _loop(self) -> None:
+        consecutive_read_failures = 0
         while True:
             eye_frame = self.eye_cam.read()
             if eye_frame is None:
-                break
+                # Don't treat a single dropped frame as end-of-stream — that
+                # exits the app mid-session and looks like a mysterious crash.
+                # Skip the frame and keep going; only give up after a sustained
+                # outage (camera actually unplugged/dead).
+                consecutive_read_failures += 1
+                if consecutive_read_failures >= _MAX_EYE_READ_FAILURES:
+                    print(f"[camera] eye cam returned no frame "
+                          f"{consecutive_read_failures}x in a row — stopping.")
+                    break
+                if consecutive_read_failures == 1:
+                    print("[camera] eye cam dropped a frame; retrying…")
+                time.sleep(0.01)
+                continue
+            consecutive_read_failures = 0
 
             self._process_eye_frame(eye_frame)
 

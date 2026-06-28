@@ -4,7 +4,14 @@ This is the only place that decides which concrete implementation of each
 ABC to use. Swap a class here (e.g. PolynomialGazeMapper -> TpsGazeMapper)
 and nothing else needs to change.
 """
+import faulthandler
+
 import cv2
+
+# Dump a Python-level stack to stderr on a fatal signal (segfault/abort). The
+# pupil_detectors/pye3d C extensions can crash the process with no traceback;
+# this makes the next such crash show exactly where it died. Harmless otherwise.
+faulthandler.enable()
 
 from scripts.eyetracker.app import App
 from scripts.eyetracker.calibration.collector import SampleCollector
