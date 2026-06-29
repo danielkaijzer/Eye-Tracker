@@ -34,10 +34,12 @@ DICT         = cv2.aruco.DICT_5X5_1000
 MARKER_RATIO = 0.72   # marker edge as fraction of square edge
 DPI          = 600
 
-# Page margins (mm). Bottom margin is taller to fit the reference ruler.
-MARGIN_TOP    = 8.0
+# Page margins (mm). Top margin is taller to fit the reference ruler; the
+# board is anchored at the bottom, since the cameras are more likely to see
+# the lower part of the panel than the top.
+MARGIN_TOP    = 14.0  # ruler lives here
 MARGIN_SIDE   = 8.0
-MARGIN_BOTTOM = 14.0  # ruler lives here
+MARGIN_BOTTOM = 8.0
 
 BOARDS = [
     {"label": "small",  "square_mm": 15.0, "id_offset": 0},
@@ -83,26 +85,28 @@ def write_pdf(png_path: Path, pdf_path: Path, board_w_mm: float,
     page_w, page_h = letter
     c = canvas.Canvas(str(pdf_path), pagesize=letter)
 
-    # Board anchored at top margin, centred horizontally.
+    # Board anchored at bottom margin, centred horizontally. The lower edge of
+    # the panel is the part the cameras are most likely to see, so the board
+    # gets the bottom of the page and the ruler goes up top.
     draw_w = board_w_mm * mm
     draw_h = board_h_mm * mm
     x = (page_w - draw_w) / 2
-    y = page_h - MARGIN_TOP * mm - draw_h
+    y = MARGIN_BOTTOM * mm
     c.drawImage(ImageReader(str(png_path)), x, y, width=draw_w, height=draw_h)
 
-    # 50 mm reference ruler in the bottom margin.
+    # 50 mm reference ruler in the top margin.
     rx = MARGIN_SIDE * mm
-    ry = 6 * mm
+    ry = page_h - 8 * mm
     c.setLineWidth(0.8)
     c.line(rx, ry, rx + 50 * mm, ry)
     for tick in range(0, 51, 10):
-        c.line(rx + tick * mm, ry, rx + tick * mm, ry + 2.5 * mm)
+        c.line(rx + tick * mm, ry, rx + tick * mm, ry - 2.5 * mm)
     c.setFont("Helvetica", 7)
-    c.drawString(rx + 52 * mm, ry, "50 mm — verify with ruler before use")
+    c.drawString(rx + 52 * mm, ry - 2 * mm, "50 mm — verify with ruler before use")
 
-    # Tiny label at very bottom-left.
+    # Tiny label at top-left, below the ruler.
     c.setFont("Helvetica", 7)
-    c.drawString(rx, 2 * mm,
+    c.drawString(rx, page_h - 12 * mm,
                  f"{spec['label'].upper()}  sq={spec['square_mm']:.0f}mm  "
                  f"mk={marker_mm:.1f}mm  {cols}x{rows}  "
                  f"IDs {int(ids[0])}-{int(ids[-1])}  DICT_5X5_1000  "
