@@ -86,9 +86,11 @@ CALIB_STD_THRESH = 12.0
 CALIB_SCENE_STD_THRESH = 10.0
 CALIB_WARMUP = 5
 
-# Quick cal: 4x3 grid, degree-2 polynomial.
+# Quick cal: 3x3 grid (9 pts = 4 corners + 4 edge midpoints + center) with a
+# degree-2 polynomial (6 coeffs, so 1.5x overdetermined — enough to average out
+# pupil jitter while keeping the per-axis x^2/y^2 edge correction).
 CALIB_QUICK_ROWS = 3
-CALIB_QUICK_COLS = 4
+CALIB_QUICK_COLS = 3
 CALIB_QUICK_MARGIN = 220
 CALIB_QUICK_DEGREE = 2
 
