@@ -42,6 +42,43 @@ In web mode, run the Next.js frontend in a separate terminal (see [`frontend/REA
 
 Calibration displays four ArUco markers (IDs 0/1/2/3, `DICT_4X4_50`) at the corners of the laptop screen — they let the routine project each target's screen pixel into the scene camera to manufacture training labels.
 
+## Camera calibration
+
+One-time geometric calibration of the two cameras. Outputs land in this
+directory as `.npz` and are committed so they persist across sessions.
+
+| Script | Output | What it does |
+| --- | --- | --- |
+| `scripts/extras/generate_charuco_board.py` | `charuco_board.png` | ChArUco board to display/print for the intrinsics steps |
+| `scripts/extras/calibrate_eye_intrinsics.py` | `eye_intrinsics.npz` | Eye-cam K + distortion |
+| `scripts/extras/calibrate_scene_intrinsics.py` | `scene_intrinsics.npz` | Scene-cam K + distortion |
+| `scripts/extras/calibrate_extrinsics.py` | `extrinsics_eye_scene.npz` | Rigid transform between the two cameras |
+
+**Intrinsics** are a property of each lens — calibrate in the optical config
+you'll actually use (IR filter on/off, locked focus). Wave the generated board
+in front of each camera, capturing 15+ varied poses:
+
+```
+py -m scripts.extras.calibrate_eye_intrinsics   --cam-index 0
+py -m scripts.extras.calibrate_scene_intrinsics --cam-index 1
+```
+
+**Extrinsics** use the calibration jig (`3d-files/calibration-jig/`): two
+ChArUco boards held at a fixed relative pose, one seen by each camera. It's a
+robot-world/hand-eye solve, so the jig only has to be *rigid* — the board↔board
+transform is recovered from data, not measured. Mount the rig in the jig, then:
+
+```
+py -m scripts.extras.calibrate_extrinsics \
+  --eye-cam-index 0 --scene-cam-index 1 \
+  --eye-board small --scene-board large \
+  --separation-mm 305
+```
+
+Vary the rig pose between captures (tilt/rotate about different axes — pure
+sliding is degenerate). The result saves both `T_eye_scene` and `T_scene_eye`;
+gaze projection wants `T_scene_eye` (eye-cam ray → scene-cam frame).
+
 ## Layout
 
 ```
