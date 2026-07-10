@@ -145,12 +145,19 @@ def _scene_intrinsics_snapshot() -> Optional[dict]:
 
 def write_session_metadata(session_dir: str,
                            snapshot: CalibrationSnapshot,
-                           report: FitReport,
-                           degree: int) -> None:
+                           report: Optional[FitReport],
+                           degree: int,
+                           phase: str = "calibration") -> None:
     """Emit `metadata.json` for a finished session: the self-contained dataset
     record. Hardware/subject fields that the pipeline does not yet produce
     (eye intrinsics, extrinsics, subject id, kappa, versions) are written as
-    null placeholders — the extrinsics jig and richer capture fill them later."""
+    null placeholders — the extrinsics jig and richer capture fill them later.
+
+    `phase` distinguishes a normal "calibration" session from a held-out
+    "validation" capture (collected identically but never fitted). A validation
+    session has no fit, so `report` is None and the `fit` field is null; its
+    labels.csv is still the same ground-truth format, so `dataset.py` reads it
+    like any other session — measure_gaze_accuracy uses it as held-out data."""
     sw, sh = snapshot.scene_size if snapshot.scene_size else (None, None)
     pw, ph = snapshot.screen_size if snapshot.screen_size else (None, None)
     eye_w, eye_h = EYE_CAM_RESOLUTION
@@ -159,7 +166,7 @@ def write_session_metadata(session_dir: str,
         "session_id": os.path.basename(os.path.normpath(session_dir)),
         "created_at": datetime.datetime.now().astimezone().isoformat(),
         "timestamp": time.time(),
-        "phase": "calibration",
+        "phase": phase,
         "subject_id": None,
         "glasses": None,
         "headset_model_version": None,
@@ -180,7 +187,7 @@ def write_session_metadata(session_dir: str,
         "rig_calibration_id": None,
         "intrinsics": {"eye": None, "scene": _scene_intrinsics_snapshot()},
         "extrinsics": None,
-        "fit": {
+        "fit": None if report is None else {
             "degree": int(degree),
             "n_points": int(report.n_points),
             "loo_avg_px": float(report.loo_avg_err),

@@ -28,10 +28,16 @@ py -m scripts.eyetracker
 | --- | --- |
 | `c` | Quick calibration (4×3 grid, degree-2 polynomial) |
 | `d` | Detailed calibration (5×4 grid, degree-3 polynomial, with worst-point recapture) |
+| `m` | Multi-pose calibration (one grid per head pose, aggregated into one fit — widens field-of-view coverage; press `c` to start each pose) |
+| `v` | Validation capture (collect-only; writes a held-out session tagged `phase: validation` for accuracy measurement, leaves the live calibration untouched) |
 | `l` | Load most recent saved calibration |
 | `r` | Reset the pye3d 3D pupil model (give it ~30 s to reconverge) |
 | `space` | Pause |
 | `q` | Quit |
+
+For why `m` and `v` exist and how to read the accuracy numbers, see
+[`docs/calibration_coverage.md`](docs/calibration_coverage.md) and
+[`docs/multipose_calibration.md`](docs/multipose_calibration.md).
 
 ## Repo layout
 
@@ -54,7 +60,7 @@ scripts/extras/             # Standalone utilities
     calibrate_scene_intrinsics.py   # ChArUco intrinsics for the scene camera
     generate_charuco_board.py       # Prints the board PNG used above
     gaze_emulator.py                # Synthetic gaze stream for dashboard dev
-    measure_gaze_accuracy.py        # Post-hoc accuracy on a labeled session
+    measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions
     heatmap.py, camera_test.py, linux_cam_stream.py
 
 experimental/               # Paused / on-hold work, kept for reference
@@ -62,6 +68,8 @@ experimental/               # Paused / on-hold work, kept for reference
 
 docs/                       # Implementation notes, citations, architecture
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
+    calibration_coverage.md         # The coverage problem + eccentricity validation tooling
+    multipose_calibration.md        # Multi-pose calibration: widening FOV coverage
     data_collection.md              # Fields the data-collection pipeline captures
     dataset_format.md               # On-disk format for sessions + calibration artifacts
     citations/                      # references.bib + references.tex
