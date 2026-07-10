@@ -79,8 +79,16 @@ class PolynomialGazeMapper(GazeMapper):
         self.coeffs_x = cx
         self.coeffs_y = cy
 
+        # Leave-one-out reprojection error, degree-agnostic: for each point,
+        # refit on the other n-1 rows and measure the held-out residual in
+        # scene-cam pixels. Only trustworthy at n >= k + 1 (at n == k the refit
+        # is underdetermined); the configured grids are all above that.
         errors = np.zeros(n)
-         
+        for i in range(n):
+            A_loo = np.delete(A, i, axis=0)
+            cx_loo, _, _, _ = np.linalg.lstsq(A_loo, np.delete(bx, i), rcond=None)
+            cy_loo, _, _, _ = np.linalg.lstsq(A_loo, np.delete(by, i), rcond=None)
+            errors[i] = math.hypot(A[i] @ cx_loo - bx[i], A[i] @ cy_loo - by[i])
 
         return FitReport(n_points=n,
                          loo_avg_err=float(np.mean(errors)),
