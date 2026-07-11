@@ -41,7 +41,11 @@ from scripts.eyetracker.calibration.persistence import (
     write_session_metadata,
 )
 from scripts.eyetracker.calibration.targets import TargetPattern
-from scripts.eyetracker.config import ARUCO_IDS, CALIB_POSE_GUIDANCE
+from scripts.eyetracker.config import (
+    ARUCO_IDS,
+    CALIB_POSE_GUIDANCE,
+    CALIB_SAMPLE_TIMEOUT_S,
+)
 from scripts.eyetracker.gaze.base import FitReport, GazeMapper
 from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
 from scripts.eyetracker.pupil.gating import JumpGate
@@ -120,6 +124,15 @@ class CalibrationRoutine:
         self.session_dir: Optional[str] = None
         self.labels_path: Optional[str] = None
 
+        # Transient status line rendered by the overlay (collector-reject
+        # reason, stall timeout, manual abort). Cleared when a new capture or
+        # pose starts. Console prints alone are invisible behind the
+        # fullscreen overlay — this is the on-screen copy.
+        self.notice: str = ""
+        # Timestamp of the last sample landed while collecting; drives the
+        # stall timeout. Refreshed by warmup frames so warmup doesn't count.
+        self._last_sample_ts: float = 0.0
+
         # Pending state cleared on every reject / advance / skip.
         self._pending_rows: list = []
         self._pending_image_paths: List[str] = []
@@ -170,6 +183,7 @@ class CalibrationRoutine:
         self._original_targets = []
         self.current_pose = 1
         self._awaiting_pose = False
+        self.notice = ""
         self.screen_width = screen_width
         self.screen_height = screen_height
         self._pending_rows = []
@@ -201,6 +215,8 @@ class CalibrationRoutine:
         if not self.is_active or self.is_collecting or self._awaiting_pose:
             return
         self.is_collecting = True
+        self.notice = ""
+        self._last_sample_ts = time.time()
         self.collector.begin()
 
     def begin_next_pose(self) -> None:
@@ -210,6 +226,7 @@ class CalibrationRoutine:
             return
         self.current_pose += 1
         self._awaiting_pose = False
+        self.notice = ""
         self.current_idx = 0
         self.targets = self.pattern.generate(self.screen_width, self.screen_height)
         self.skipped_indices = []
@@ -233,9 +250,22 @@ class CalibrationRoutine:
             self.is_collecting = False
             self.collector.reset()
 
+        self.notice = ""
         self.skipped_indices.append(self.current_idx)
         print(f"Skipped point {self.current_idx + 1}/{self.total_points}.")
         self._advance_or_finish()
+
+    def abort_capture(self, reason: str = "Aborted — press 'c' to retry.") -> None:
+        """Abandon the in-progress fixation (Esc key, or the stall timeout):
+        throw away pending rows/images and return to the idle "press 'c'"
+        state on the SAME point. skip() by contrast advances past the point."""
+        if not (self.is_active and self.is_collecting):
+            return
+        self._discard_pending()
+        self.is_collecting = False
+        self.collector.reset()
+        self.notice = reason
+        print(f"  {reason}")
 
     # ---- Per-frame drive -----------------------------------------------------
 
@@ -249,9 +279,20 @@ class CalibrationRoutine:
         the pupil pipeline; pass them straight in."""
         if not (self.is_active and self.is_collecting):
             return
+        # Stall check first — the early-returns below (no pupil, no scene,
+        # no homography) are exactly the conditions that used to leave a
+        # point "collecting" forever while the user drifted off-target.
+        now = time.time()
+        if now - self._last_sample_ts > CALIB_SAMPLE_TIMEOUT_S:
+            self.abort_capture(
+                f"Timed out ({CALIB_SAMPLE_TIMEOUT_S:.0f}s without a usable "
+                "sample) — adjust and press 'c' to retry.")
+            return
         if pupil_center is None or eye_frame is None:
             return
         if self.collector.consume_warmup_frame():
+            # Warmup frames don't count toward the stall clock.
+            self._last_sample_ts = now
             return
 
         if scene_frame is None:
@@ -259,7 +300,10 @@ class CalibrationRoutine:
                             "  No scene camera — cannot calibrate in scene-cam mode.")
             return
 
-        H, _ = self.target_mapper.compute_homography(scene_frame)
+        # The App already ran process_frame() (one ArUco detection) on this
+        # exact frame before handing it to us — solve from that cache instead
+        # of paying a second detection pass per frame.
+        H, _ = self.target_mapper.cached_homography()
         if H is None:
             self._throttled("_last_aruco_log_ts",
                             "  [aruco] not all 4 markers visible")
@@ -294,28 +338,26 @@ class CalibrationRoutine:
 
         result = self.collector.add(np.array(pupil_center, dtype=float),
                                     np.array([target_u, target_v], dtype=float))
+        self._last_sample_ts = now
         if result is None:
             return
         if isinstance(result, CollectorReject):
             print(f"  {result.reason}")
+            self.notice = result.reason
             self._discard_pending()
             self.is_collecting = False
             self.collector.reset()
             return
         assert isinstance(result, CollectorAccept)
-        self._accept(result, scene_frame, target_u, target_v)
+        self._accept(result)
 
     # ---- Internals -----------------------------------------------------------
 
-    def _accept(self,
-                result: CollectorAccept,
-                scene_frame: np.ndarray,
-                target_u: float,
-                target_v: float) -> None:
+    def _accept(self, result: CollectorAccept) -> None:
         self.captured_pupil.append(result.pupil_median)
         self.captured_scene.append(result.scene_median)
         self.captured_target_indices.append(self.current_idx)
-        self._log_aruco_check(scene_frame, result.scene_median)
+        self._log_aruco_check(result.scene_median)
         append_label_rows(self.labels_path, self._pending_rows)
         self._pending_rows = []
         self._pending_image_paths = []
@@ -323,10 +365,9 @@ class CalibrationRoutine:
         self.collector.reset()
         self._advance_or_finish()
 
-    def _log_aruco_check(self, scene_frame: np.ndarray,
-                          scene_median: np.ndarray) -> None:
+    def _log_aruco_check(self, scene_median: np.ndarray) -> None:
         try:
-            H_chk, reproj_err = self.target_mapper.compute_homography(scene_frame)
+            H_chk, reproj_err = self.target_mapper.cached_homography()
         except Exception as e:
             print(f"  ArUco detection error for fixation {self.current_idx}: {e}")
             return

@@ -7,9 +7,13 @@ frame and solve for the screen->scene homography via cv2.findHomography.
 Stateful pieces:
 - screen size (must be set before screen_anchor_points / quiet_zone_origins
   return non-empty results)
-- last marker count (cached for HUD display by the Tk overlay)
+- per-frame detection cache written by process_frame(): last marker count +
+  found IDs (for the Tk overlay HUD) and the raw corners/ids (so
+  cached_homography() can solve without re-running detection — detection on
+  a 1080p frame is the expensive step and used to run twice per frame during
+  collection)
 """
-from typing import Dict, Optional, Tuple
+from typing import Dict, FrozenSet, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -28,6 +32,10 @@ class ArucoHomography(TargetMapper):
         self.screen_width: Optional[int] = None
         self.screen_height: Optional[int] = None
         self.last_marker_count = 0
+        self.last_found_ids: FrozenSet[int] = frozenset()
+        # Raw detection from the most recent process_frame() call.
+        self._cached_corners: Optional[Tuple] = None
+        self._cached_ids: Optional[np.ndarray] = None
 
     def set_screen_size(self, width: int, height: int) -> None:
         self.screen_width = width
@@ -62,26 +70,55 @@ class ArucoHomography(TargetMapper):
             self.marker_ids[3]: (0, sh - q),
         }
 
-    def update_marker_count(self, scene_bgr: Optional[np.ndarray]) -> int:
-        """Detect markers and cache how many of self.marker_ids were found."""
+    def process_frame(self, scene_bgr: Optional[np.ndarray]) -> int:
+        """Run marker detection ONCE for this scene frame and cache the result.
+
+        Call once per new scene frame (the App loop does). Updates
+        last_marker_count / last_found_ids for the overlay HUD and stores the
+        raw corners/ids so cached_homography() can solve without re-detecting.
+        Returns the marker count."""
         if scene_bgr is None:
-            self.last_marker_count = 0
-            return 0
-        _, ids = detect_markers(scene_bgr)
+            corners, ids = None, None
+        else:
+            corners, ids = detect_markers(scene_bgr)
+        self._cached_corners = corners
+        self._cached_ids = ids
         if ids is None:
-            self.last_marker_count = 0
-            return 0
-        found = {int(i) for i in ids.flatten()} & set(self.marker_ids)
-        self.last_marker_count = len(found)
+            self.last_found_ids = frozenset()
+        else:
+            self.last_found_ids = (frozenset(int(i) for i in ids.flatten())
+                                   & frozenset(self.marker_ids))
+        self.last_marker_count = len(self.last_found_ids)
         return self.last_marker_count
+
+    def draw_cached_detections(self, frame_bgr: np.ndarray) -> None:
+        """Outline the markers found by the last process_frame() call onto
+        frame_bgr in place (pass the same frame the cache came from) — used
+        by the calibration overlay's troubleshooting preview."""
+        if self._cached_ids is None or len(self._cached_ids) == 0:
+            return
+        cv2.aruco.drawDetectedMarkers(frame_bgr, self._cached_corners,
+                                      self._cached_ids)
+
+    def cached_homography(self) -> Tuple[Optional[np.ndarray], Optional[float]]:
+        """Solve the homography from the detection cached by the most recent
+        process_frame() call — no re-detection. Only valid for that same frame;
+        callers holding a different frame must use compute_homography()."""
+        return self._homography_from(self._cached_corners, self._cached_ids)
 
     def compute_homography(self, scene_bgr: Optional[np.ndarray]
                            ) -> Tuple[Optional[np.ndarray], Optional[float]]:
-        """Solve for the 3x3 screen->scene homography H and the mean
-        reprojection error in scene-cam pixels. (None, None) on failure."""
+        """Detect markers in scene_bgr and solve for the 3x3 screen->scene
+        homography H and the mean reprojection error in scene-cam pixels.
+        (None, None) on failure. Prefer cached_homography() when
+        process_frame() already ran on this exact frame."""
         if scene_bgr is None:
             return None, None
         corners, ids = detect_markers(scene_bgr)
+        return self._homography_from(corners, ids)
+
+    def _homography_from(self, corners, ids
+                         ) -> Tuple[Optional[np.ndarray], Optional[float]]:
         if ids is None or len(ids) < 4:
             return None, None
         id_to_center: Dict[int, np.ndarray] = {}

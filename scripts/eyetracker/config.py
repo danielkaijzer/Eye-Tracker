@@ -85,6 +85,11 @@ CALIB_INLIERS = 10
 CALIB_STD_THRESH = 12.0
 CALIB_SCENE_STD_THRESH = 10.0
 CALIB_WARMUP = 5
+# Abort a stuck fixation: while collecting, if no sample has landed for this
+# long (pupil lost, markers dropped, glare), stop collecting and return to the
+# idle "press 'c'" state on the same point instead of hanging until the user
+# drifts and pollutes the capture. Warmup frames don't count toward the clock.
+CALIB_SAMPLE_TIMEOUT_S = 5.0
 
 # Quick cal: 3x3 grid (9 pts = 4 corners + 4 edge midpoints + center) with a
 # degree-2 polynomial (6 coeffs, so 1.5x overdetermined — enough to average out
@@ -143,3 +148,12 @@ ARUCO_DICT_NAME = "DICT_4X4_50"
 ARUCO_MARKER_PX = 120
 ARUCO_QUIET_ZONE_PX = 140
 ARUCO_IDS = (0, 1, 2, 3)
+# Displayed brightness (0-255) of the marker white cells AND quiet zones —
+# they must match or detection contrast suffers. Full white can bloom/clip on
+# the scene cam; dropping toward grey keeps the cells in the sensor's linear
+# range. ArUco thresholds adaptively so grey-on-black still detects; keep
+# comfortably above the black cells. Adjustable live with '-' / '=' during
+# calibration (steps of ARUCO_WHITE_STEP, floor at ARUCO_WHITE_MIN).
+ARUCO_WHITE_LEVEL = 255
+ARUCO_WHITE_STEP = 15
+ARUCO_WHITE_MIN = 60
