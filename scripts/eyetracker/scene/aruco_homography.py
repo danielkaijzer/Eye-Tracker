@@ -12,12 +12,36 @@ Stateful pieces:
   cached_homography() can solve without re-running detection — detection on
   a 1080p frame is the expensive step and used to run twice per frame during
   collection)
+- scene-cam intrinsics (K, dist), loaded once from scene_intrinsics.json if
+  it exists (produced by calibrate_scene_intrinsics.py). Optional: if the
+  file is missing, everything below falls back to exactly the old
+  no-distortion-correction behavior.
+
+Lens distortion and the H-space / pixel-space split
+-----------------------------------------------------
+cv2.findHomography assumes a pinhole (no distortion) mapping between the two
+point sets. Marker corners live near the frame edges — exactly where real
+lens distortion is largest — so fitting H directly to raw distorted pixels
+biases the geometry most right where accuracy matters most.
+
+When intrinsics are available we instead solve H in "H-space": screen pixels
+-> undistorted, normalized camera coordinates (cv2.undistortPoints with no P
+matrix). This is what _pixel_to_hspace/_hspace_to_pixel below convert to/from.
+Everything a caller actually consumes — labels.csv scene_target_x/y, the
+live gaze overlay, saved scene frames — must stay in RAW scene-cam pixel
+space, since that's the space the raw frame itself (and the live prediction
+drawn on top of it) is in. So every public projection (project_via_homography,
+screen_to_scene, scene_to_screen) redistorts back to pixel space before
+returning — callers never need to know which space H was solved in.
 """
+import json
+import os
 from typing import Dict, FrozenSet, Optional, Tuple
 
 import cv2
 import numpy as np
 
+from scripts.eyetracker.calibration.paths import scene_intrinsics_path
 from scripts.eyetracker.config import ARUCO_IDS, ARUCO_QUIET_ZONE_PX
 from scripts.eyetracker.scene.aruco_dict import detect_markers
 from scripts.eyetracker.scene.target_mapper import TargetMapper, XY
@@ -36,6 +60,61 @@ class ArucoHomography(TargetMapper):
         # Raw detection from the most recent process_frame() call.
         self._cached_corners: Optional[Tuple] = None
         self._cached_ids: Optional[np.ndarray] = None
+        self._K: Optional[np.ndarray] = None
+        self._dist: Optional[np.ndarray] = None
+        self._has_intrinsics = self._load_intrinsics()
+
+    def _load_intrinsics(self) -> bool:
+        """Load scene-cam K/dist from scene_intrinsics.json if it exists.
+        Returns whether intrinsics are now available; on any failure (missing
+        file, malformed JSON) falls back to no-distortion-correction and
+        leaves _K/_dist as None, matching the file's pre-undistortion
+        behavior."""
+        path = scene_intrinsics_path()
+        if not os.path.exists(path):
+            print("[aruco] no scene_intrinsics.json — solving homography "
+                  "without lens-distortion correction. Run "
+                  "calibrate_scene_intrinsics.py to enable it.")
+            return False
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            self._K = np.array(data["K"], dtype=np.float64)
+            self._dist = np.array(data["dist"], dtype=np.float64).reshape(-1)
+        except (KeyError, ValueError, TypeError) as e:
+            print(f"[aruco] scene_intrinsics.json malformed ({e}) — solving "
+                  "homography without lens-distortion correction.")
+            self._K = None
+            self._dist = None
+            return False
+        print(f"[aruco] using scene_intrinsics.json for lens-distortion-aware "
+              f"homography (fx={self._K[0, 0]:.1f}px, "
+              f"reproj_rms={data.get('reproj_rms', float('nan')):.2f}px)")
+        return True
+
+    # ---- H-space <-> raw pixel-space conversions ----
+
+    def _pixel_to_hspace(self, pts_px: np.ndarray) -> np.ndarray:
+        """(N,2) raw distorted scene-cam pixels -> H-space: undistorted,
+        normalized camera coordinates if intrinsics are loaded, else an
+        unchanged pass-through (H-space == pixel space)."""
+        if not self._has_intrinsics:
+            return pts_px.astype(np.float64)
+        pts = pts_px.reshape(-1, 1, 2).astype(np.float64)
+        undistorted = cv2.undistortPoints(pts, self._K, self._dist)
+        return undistorted.reshape(-1, 2)
+
+    def _hspace_to_pixel(self, xy_h: np.ndarray) -> Tuple[float, float]:
+        """A single H-space point -> raw distorted scene-cam pixel
+        coordinates, redistorting via the known lens model. Inverse of
+        _pixel_to_hspace for one point."""
+        if not self._has_intrinsics:
+            return float(xy_h[0]), float(xy_h[1])
+        obj = np.array([[xy_h[0], xy_h[1], 1.0]], dtype=np.float64)
+        zero = np.zeros(3)
+        img_pts, _ = cv2.projectPoints(obj, zero, zero, self._K, self._dist)
+        px = img_pts.reshape(2)
+        return float(px[0]), float(px[1])
 
     def set_screen_size(self, width: int, height: int) -> None:
         self.screen_width = width
@@ -135,9 +214,15 @@ class ArucoHomography(TargetMapper):
             return None, None
 
         screen_pts = np.array([anchors[i] for i in self.marker_ids], dtype=np.float32)
-        scene_pts = np.array([id_to_center[i] for i in self.marker_ids], dtype=np.float32)
+        scene_pts_px = np.array([id_to_center[i] for i in self.marker_ids],
+                                dtype=np.float32)
+        # Solve in H-space (undistorted-normalized if intrinsics are loaded,
+        # else raw pixels — see module docstring) so the fit isn't biased by
+        # lens distortion at the marker corners, which sit near frame edges.
+        scene_pts_h = self._pixel_to_hspace(scene_pts_px)
 
-        H, _ = cv2.findHomography(screen_pts, scene_pts, method=0)
+        H, _ = cv2.findHomography(screen_pts, scene_pts_h.astype(np.float32),
+                                  method=0)
         if H is None:
             return None, None
 
@@ -146,9 +231,27 @@ class ArucoHomography(TargetMapper):
         ws = projected[:, 2:3]
         if np.any(np.abs(ws) < 1e-9):
             return None, None
-        projected_xy = projected[:, :2] / ws
-        errs = np.linalg.norm(projected_xy - scene_pts, axis=1)
+        projected_h = projected[:, :2] / ws
+        # Redistort back to raw pixel space so the reported error stays in
+        # the same units/meaning as before (compared against the raw
+        # detected marker centers, not the undistorted ones).
+        projected_px = np.array([self._hspace_to_pixel(p) for p in projected_h])
+        errs = np.linalg.norm(projected_px - scene_pts_px, axis=1)
         return H, float(np.mean(errs))
+
+    def project_via_homography(self, xy_screen: XY,
+                               H: np.ndarray) -> Optional[XY]:
+        """Project an on-screen point through H (as returned by
+        cached_homography()/compute_homography()) to RAW scene-cam pixel
+        coordinates, redistorting if H was solved in H-space. Centralizes the
+        homogeneous divide + redistort so callers (routine.py) never touch H
+        directly or need to know which space it was solved in."""
+        v = np.array([xy_screen[0], xy_screen[1], 1.0], dtype=float)
+        out = H @ v
+        if abs(out[2]) < 1e-9:
+            return None
+        xy_h = out[:2] / out[2]
+        return self._hspace_to_pixel(xy_h)
 
     # ---- TargetMapper interface ----
 
@@ -160,11 +263,7 @@ class ArucoHomography(TargetMapper):
         H, _ = self.compute_homography(scene_frame)
         if H is None:
             return None
-        v = np.array([xy_screen[0], xy_screen[1], 1.0], dtype=float)
-        out = H @ v
-        if abs(out[2]) < 1e-9:
-            return None
-        return (float(out[0] / out[2]), float(out[1] / out[2]))
+        return self.project_via_homography(xy_screen, H)
 
     def scene_to_screen(self, xy_scene: XY, scene_frame: np.ndarray) -> Optional[XY]:
         H, _ = self.compute_homography(scene_frame)
@@ -174,7 +273,9 @@ class ArucoHomography(TargetMapper):
             H_inv = np.linalg.inv(H)
         except np.linalg.LinAlgError:
             return None
-        v = np.array([xy_scene[0], xy_scene[1], 1.0], dtype=float)
+        xy_h = self._pixel_to_hspace(
+            np.array([[xy_scene[0], xy_scene[1]]], dtype=np.float64))[0]
+        v = np.array([xy_h[0], xy_h[1], 1.0], dtype=float)
         out = H_inv @ v
         if abs(out[2]) < 1e-9:
             return None
