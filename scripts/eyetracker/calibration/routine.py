@@ -310,13 +310,12 @@ class CalibrationRoutine:
             return
 
         tx, ty = self.targets[self.current_idx]
-        proj = H @ np.array([tx, ty, 1.0], dtype=float)
-        if abs(proj[2]) < 1e-9:
+        target_uv = self.target_mapper.project_via_homography((tx, ty), H)
+        if target_uv is None:
             self._throttled("_last_aruco_log_ts",
                             "  [aruco] degenerate homography projection")
             return
-        target_u = float(proj[0] / proj[2])
-        target_v = float(proj[1] / proj[2])
+        target_u, target_v = target_uv
 
         sample_idx = self.collector.sample_count()
         img_name = f"fix{self.current_idx:02d}_sample{sample_idx:02d}.png"
@@ -375,12 +374,10 @@ class CalibrationRoutine:
             print(f"  ArUco: not all 4 markers visible for fixation {self.current_idx}")
             return
         tx, ty = self.targets[self.current_idx]
-        v = np.array([tx, ty, 1.0], dtype=float)
-        proj_chk = H_chk @ v
-        if abs(proj_chk[2]) <= 1e-9:
+        proj_chk = self.target_mapper.project_via_homography((tx, ty), H_chk)
+        if proj_chk is None:
             return
-        u = float(proj_chk[0] / proj_chk[2])
-        vp = float(proj_chk[1] / proj_chk[2])
+        u, vp = proj_chk
         err = math.sqrt((u - scene_median[0]) ** 2 + (vp - scene_median[1]) ** 2)
         print(f"  ArUco check: fixation {self.current_idx} predicted "
               f"({u:.1f},{vp:.1f}) vs label-median "
