@@ -43,6 +43,19 @@ class Display(ABC):
 
 
 class CalibrationOverlay(ABC):
+    # Per-frame state stamped by the App before render(); implementations may
+    # ignore them. exposure_status is a one-line scene-exposure summary;
+    # pupil_ok is whether the pupil pipeline produced an accepted center this
+    # frame (post confidence + jump gates).
+    exposure_status: str = ""
+    pupil_ok: bool = True
+    # In-overlay camera preview ('p' hotkey). preview_enabled is owned by the
+    # overlay (toggle_preview); while it is True the App stamps the two frames
+    # (BGR arrays, already annotated + downscaled) before each render().
+    preview_enabled: bool = False
+    preview_scene: Optional[np.ndarray] = None
+    preview_eye: Optional[np.ndarray] = None
+
     @abstractmethod
     def open(self) -> Tuple[int, int]:
         """Open the fullscreen overlay; return (screen_width, screen_height)."""
@@ -64,3 +77,10 @@ class CalibrationOverlay(ABC):
     @abstractmethod
     def poll_key(self) -> Optional[str]:
         """Return the next queued key char, or None."""
+
+    def nudge_marker_white(self, direction: int) -> None:
+        """Optional: adjust the displayed ArUco white level by one step
+        (+1 brighter / -1 darker). Default: no-op."""
+
+    def toggle_preview(self) -> None:
+        """Optional: toggle the in-overlay camera preview. Default: no-op."""

@@ -1,30 +1,48 @@
-"""Recompute gaze tracker accuracy from a saved session.
+"""Recompute gaze tracker accuracy from saved calibration sessions.
 
 Loads a `session_<ts>/` (metadata.json for scene intrinsics + sizes, labels.csv
 for the captured samples), refits the polynomial (deterministic — same lstsq as
-live calibration), and prints LOO error in both pixels and degrees, plus a
-per-point breakdown.
+live calibration), and reports error in pixels and degrees. Two views:
+
+- In-sample: leave-one-out error over the fit points, binned by eccentricity
+  (angular distance from the scene-cam principal point). Because head-on
+  calibration clusters points near scene-center, the inner bins dominate.
+- Held-out: pass one or more validation session dirs (captured with 'v', tagged
+  `phase: validation`, ideally at steep head angles). The fit is evaluated on
+  data it never saw, binned by eccentricity — this is what quantifies accuracy
+  *outside* the calibrated region. A validation session is a normal session with
+  labels.csv but no fit, so it loads exactly like a calibration one.
 
 The fit uses the per-fixation median of the raw labels.csv rows, which closely
 tracks the live-calibration fit (live uses the median of inlier samples; this
 uses the median of all collected samples, so numbers can differ slightly).
 
-Useful for:
-- Checking accuracy of past calibration sessions without re-running.
-- Spotting bad fixations (sort by error -> outliers float to the top).
-- Tracking accuracy over time after hardware/config changes.
+Camera intrinsics use the standard OpenCV symbols (read from the session's
+metadata.json, which inlines the scene-cam intrinsics); they recur below:
+    K       3x3 camera intrinsic matrix.
+    fx      focal length in pixels, K[0][0].
+    cx, cy  principal point in pixels, K[0][2] / K[1][2] — the pixel the optical
+            axis pierces, i.e. "straight ahead" in the scene image. Eccentricity
+            is measured outward from here.
 
 Run:  python -m scripts.extras.measure_gaze_accuracy [--session <dir>]
-      (default: the most recent session under data/calibration/)
+      python -m scripts.extras.measure_gaze_accuracy --val data/calibration/session_<ts>
+      (--session default: the most recent session under data/calibration/)
 """
 import argparse
 import datetime
 import math
 import sys
 
+import numpy as np
+
 from scripts.eyetracker.calibration.paths import dataset_root
 from scripts.eyetracker.dataset import load_session, session_dirs
 from scripts.eyetracker.gaze.polynomial import PolynomialGazeMapper
+
+
+# Eccentricity bin edges in degrees; last bin is open-ended.
+ECCENTRICITY_BIN_EDGES = [0.0, 5.0, 10.0, 15.0, 20.0, float("inf")]
 
 
 def _resolve_session(arg: str) -> str:
@@ -36,66 +54,166 @@ def _resolve_session(arg: str) -> str:
     return dirs[-1]
 
 
+def _load_fixation_medians(session_dir: str):
+    """Load a session and collapse its labels.csv to one row per fixation (the
+    median of that fixation's samples, matching the live fit). Returns
+    (metadata, pupil_vectors, scene_points, screen_points); metadata is None for
+    legacy sessions with no metadata.json."""
+    metadata, df = load_session(session_dir)
+    grouped = df.groupby("fixation_id").median(numeric_only=True)
+    pupil_vectors = grouped[["pupil_x", "pupil_y"]].to_numpy(dtype=float)
+    scene_points = grouped[["scene_target_x", "scene_target_y"]].to_numpy(dtype=float)
+    screen_points = grouped[["x_screen", "y_screen"]].to_numpy(dtype=float)
+    return metadata, pupil_vectors, scene_points, screen_points
+
+
+def _scene_intrinsics(metadata: dict, session_dir: str):
+    """Return (fx, cx, cy) from a session's inlined scene intrinsics, or exit
+    with a message if the session lacks them."""
+    scene_intr = (metadata.get("intrinsics") or {}).get("scene") if metadata else None
+    if not scene_intr or scene_intr.get("K") is None:
+        sys.exit(f"{session_dir} has no scene intrinsics. Run "
+                 "scripts.extras.calibrate_scene_intrinsics first.")
+    K = scene_intr["K"]
+    return float(K[0][0]), float(K[0][2]), float(K[1][2])
+
+
+def _bin_label(bin_index: int) -> str:
+    low, high = ECCENTRICITY_BIN_EDGES[bin_index], ECCENTRICITY_BIN_EDGES[bin_index + 1]
+    return f">{low:g}°" if high == float("inf") else f"{low:g}-{high:g}°"
+
+
+def _bin_index(eccentricity_deg: float) -> int:
+    for i in range(len(ECCENTRICITY_BIN_EDGES) - 1):
+        if ECCENTRICITY_BIN_EDGES[i] <= eccentricity_deg < ECCENTRICITY_BIN_EDGES[i + 1]:
+            return i
+    return len(ECCENTRICITY_BIN_EDGES) - 2
+
+
+def _eccentricity_deg(scene_points: np.ndarray, fx: float,
+                      cx: float, cy: float) -> np.ndarray:
+    """Angular distance (degrees) of each scene point from the principal point
+    (cx, cy), via the pinhole model with focal length fx in pixels."""
+    radius_px = np.hypot(scene_points[:, 0] - cx, scene_points[:, 1] - cy)
+    return np.degrees(np.arctan(radius_px / fx))
+
+
+def _predict_errors(mapper: PolynomialGazeMapper,
+                    pupil: np.ndarray, scene: np.ndarray) -> np.ndarray:
+    """Pixel error between predicted and labelled scene point per sample."""
+    pred_pts = np.array([mapper.predict((float(p[0]), float(p[1]))) for p in pupil])
+    return np.hypot(pred_pts[:, 0] - scene[:, 0], pred_pts[:, 1] - scene[:, 1])
+
+
+def _print_eccentricity_table(title: str, eccentricity_deg: np.ndarray,
+                              errors_px: np.ndarray, fx: float) -> None:
+    """Print mean/max error per eccentricity band. fx (focal length, px)
+    converts pixel error to degrees."""
+    print(title)
+    print(f"  {'band':>8} {'n':>4} {'mean':>9} {'mean°':>7} "
+          f"{'max':>9} {'max°':>7}")
+    errors_px = np.asarray(errors_px, dtype=float)
+    for i in range(len(ECCENTRICITY_BIN_EDGES) - 1):
+        in_band = np.array([_bin_index(angle) == i for angle in eccentricity_deg])
+        count = int(in_band.sum())
+        if count == 0:
+            continue
+        band_errors = errors_px[in_band]
+        mean_deg = math.degrees(math.atan(float(band_errors.mean()) / fx))
+        max_deg = math.degrees(math.atan(float(band_errors.max()) / fx))
+        print(f"  {_bin_label(i):>8} {count:>4} {band_errors.mean():>7.1f}px {mean_deg:>6.2f}° "
+              f"{band_errors.max():>7.1f}px {max_deg:>6.2f}°")
+    mean_deg = math.degrees(math.atan(float(errors_px.mean()) / fx))
+    max_deg = math.degrees(math.atan(float(errors_px.max()) / fx))
+    print(f"  {'overall':>8} {len(errors_px):>4} {errors_px.mean():>7.1f}px "
+          f"{mean_deg:>6.2f}° {errors_px.max():>7.1f}px {max_deg:>6.2f}°")
+    print()
+
+
+def _coverage_report(pupil_vectors: np.ndarray, scene_points: np.ndarray,
+                     fx: float, cx: float, cy: float) -> None:
+    """Print pupil-pixel span and the eccentricity histogram of the fit set.
+    fx / (cx, cy) are the focal length and principal point (see module doc)."""
+    print("Coverage (fit set):")
+    print(f"  pupil x: {pupil_vectors[:, 0].min():7.1f} .. {pupil_vectors[:, 0].max():7.1f} px"
+          f"   y: {pupil_vectors[:, 1].min():7.1f} .. {pupil_vectors[:, 1].max():7.1f} px")
+    eccentricity = _eccentricity_deg(scene_points, fx, cx, cy)
+    counts = np.zeros(len(ECCENTRICITY_BIN_EDGES) - 1, dtype=int)
+    for angle in eccentricity:
+        counts[_bin_index(angle)] += 1
+    histogram = "  ".join(f"{_bin_label(i)}:{counts[i]}"
+                          for i in range(len(counts)) if counts[i])
+    print(f"  gaze eccentricity: {eccentricity.min():.1f}° .. {eccentricity.max():.1f}°   [{histogram}]")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session", default=None,
-                        help="session dir to analyze (default: most recent)")
+                        help="calibration session dir to analyze "
+                             "(default: most recent under data/calibration/)")
+    parser.add_argument("--val", nargs="*", default=[],
+                        help="held-out validation session dir(s) to evaluate the "
+                             "fit against (captured with 'v'; globs allowed).")
     args = parser.parse_args()
 
     session = _resolve_session(args.session)
-    metadata, df = load_session(session)
+    metadata, pupil_vectors, scene_points, screen_points = _load_fixation_medians(session)
     if metadata is None:
         sys.exit(f"{session} has no metadata.json (legacy session) — "
                  "cannot read scene intrinsics.")
-    scene_intr = (metadata.get("intrinsics") or {}).get("scene")
-    if not scene_intr or scene_intr.get("K") is None:
-        sys.exit("Session has no scene intrinsics. Run "
-                 "scripts.extras.calibrate_scene_intrinsics first.")
-
-    fx = float(scene_intr["K"][0][0])
-    sw = int(metadata["scene_cam"]["width"])
-    sh = int(metadata["scene_cam"]["height"])
-    ts = datetime.datetime.fromtimestamp(float(metadata["timestamp"]))
+    fx, cx, cy = _scene_intrinsics(metadata, session)
+    scene_width = int(metadata["scene_cam"]["width"])
+    scene_height = int(metadata["scene_cam"]["height"])
+    session_time = datetime.datetime.fromtimestamp(float(metadata["timestamp"]))
     degree = int((metadata.get("fit") or {}).get("degree", 2))
 
-    # Per-fixation median (one point per target), matching the live fit.
-    grouped = df.groupby("fixation_id").median(numeric_only=True)
-    V = grouped[["pupil_x", "pupil_y"]].to_numpy(dtype=float)
-    S = grouped[["scene_target_x", "scene_target_y"]].to_numpy(dtype=float)
-    SP = grouped[["x_screen", "y_screen"]].to_numpy(dtype=float)
-
-    print("=" * 68)
+    print("=" * 72)
     print(f"Session:             {metadata['session_id']}")
-    print(f"Captured:            {ts}")
-    print(f"Scene resolution:    {sw}x{sh}")
-    print(f"fx (from intr):      {fx:.2f} px")
+    print(f"Captured:            {session_time}")
+    print(f"Scene resolution:    {scene_width}x{scene_height}")
+    print(f"fx / principal:      {fx:.1f} px / ({cx:.1f}, {cy:.1f})")
     print(f"Polynomial degree:   {degree}")
     print()
-    print(f"scene_points x range: {float(S[:, 0].min()):7.1f} .. {float(S[:, 0].max()):7.1f}  "
-          f"({(S[:, 0].max() - S[:, 0].min()) / sw * 100:.1f}% of frame width)")
-    print(f"scene_points y range: {float(S[:, 1].min()):7.1f} .. {float(S[:, 1].max()):7.1f}  "
-          f"({(S[:, 1].max() - S[:, 1].min()) / sh * 100:.1f}% of frame height)")
-    print()
 
-    report = PolynomialGazeMapper(degree=degree).fit(V, S)
+    _coverage_report(pupil_vectors, scene_points, fx, cx, cy)
+
+    mapper = PolynomialGazeMapper(degree=degree)
+    report = mapper.fit(pupil_vectors, scene_points)
     avg_deg = math.degrees(math.atan(report.loo_avg_err / fx))
     max_deg = math.degrees(math.atan(report.loo_max_err / fx))
-    print(f"n_points:  {report.n_points}")
-    print(f"LOO avg:   {report.loo_avg_err:7.3f} px   ->  {avg_deg:.4f}°")
-    print(f"LOO max:   {report.loo_max_err:7.3f} px   ->  {max_deg:.4f}°")
-    print()
+    print(f"In-sample LOO over {report.n_points} fit points: "
+          f"avg {report.loo_avg_err:.1f}px ({avg_deg:.2f}°), "
+          f"max {report.loo_max_err:.1f}px ({max_deg:.2f}°)")
+    eccentricity_fit = _eccentricity_deg(scene_points, fx, cx, cy)
+    _print_eccentricity_table("In-sample LOO error by eccentricity:",
+                              eccentricity_fit, report.per_point_errs, fx)
 
-    print("Per-point error (sorted worst → best):")
+    # Evaluate the (full-data) fit against any held-out validation sessions.
+    for val_session in args.val:
+        _, val_pupil, val_scene, _ = _load_fixation_medians(val_session)
+        errors = _predict_errors(mapper, val_pupil, val_scene)
+        eccentricity = _eccentricity_deg(val_scene, fx, cx, cy)
+        print("-" * 72)
+        print(f"Held-out validation: {val_session} ({len(val_pupil)} points)")
+        _print_eccentricity_table("Held-out error by eccentricity:",
+                                  eccentricity, errors, fx)
+
+    if not args.val:
+        print("(no --val sessions given; pass a validation session dir to "
+              "measure held-out / wide-angle accuracy)")
+
+    print("Worst in-sample points (sorted worst → best):")
     print(f"  {'pt':>3} {'px':>9} {'deg':>8}   screen_px         pupil_px")
-    errs = report.per_point_errs
-    order = sorted(range(len(errs)), key=lambda i: -errs[i])
-    for i in order:
-        e_px = float(errs[i])
-        e_deg = math.degrees(math.atan(e_px / fx))
-        sp = tuple(int(x) for x in SP[i])
-        vv = (float(V[i, 0]), float(V[i, 1]))
-        print(f"  {i:>3} {e_px:>9.2f} {e_deg:>7.3f}°   {sp}   ({vv[0]:.1f}, {vv[1]:.1f})")
-    print("=" * 68)
+    point_errors = report.per_point_errs
+    order = sorted(range(len(point_errors)), key=lambda i: -point_errors[i])
+    for i in order[:10]:
+        error_px = float(point_errors[i])
+        error_deg = math.degrees(math.atan(error_px / fx))
+        screen_pt = tuple(int(x) for x in screen_points[i])
+        pupil_pt = (float(pupil_vectors[i, 0]), float(pupil_vectors[i, 1]))
+        print(f"  {i:>3} {error_px:>9.2f} {error_deg:>7.3f}°   {screen_pt}   ({pupil_pt[0]:.1f}, {pupil_pt[1]:.1f})")
+    print("=" * 72)
 
 
 if __name__ == "__main__":

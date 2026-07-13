@@ -69,11 +69,16 @@ def detect_markers(scene_bgr: np.ndarray) -> Tuple[Optional[Tuple], Optional[np.
     return corners, ids
 
 
-def generate_marker_png(marker_id: int, size_px: int) -> bytes:
+def generate_marker_png(marker_id: int, size_px: int,
+                        white_level: int = 255) -> bytes:
     """Render a marker to a PNG byte string. Useful for the Tk overlay
-    (which wraps it in a tk.PhotoImage)."""
+    (which wraps it in a tk.PhotoImage). white_level dims the white cells
+    (255 = full white) so they don't bloom on the scene cam; the caller must
+    render the surrounding quiet zone at the same level."""
     _require_aruco()
     img = cv2.aruco.generateImageMarker(get_aruco_dict(), marker_id, size_px)
+    if white_level < 255:
+        img[img > 127] = white_level
     ok, buf = cv2.imencode(".png", img)
     if not ok:
         raise RuntimeError(f"Failed to encode ArUco marker {marker_id} to PNG.")

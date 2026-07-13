@@ -49,6 +49,8 @@ class App:
                  target_mapper: ArucoHomography,
                  quick_routine: CalibrationRoutine,
                  detailed_routine: CalibrationRoutine,
+                 multipose_routine: CalibrationRoutine,
+                 validation_routine: CalibrationRoutine,
                  overlay: CalibrationOverlay,
                  display: Display):
         self.eye_cam = eye_cam
@@ -61,17 +63,26 @@ class App:
         self.target_mapper = target_mapper
         self.quick_routine = quick_routine
         self.detailed_routine = detailed_routine
+        self.multipose_routine = multipose_routine
+        self.validation_routine = validation_routine
         # `routine` is the currently-active calibration state machine.
-        # `_start_calibration` reassigns it to quick_routine or
-        # detailed_routine depending on which hotkey the user pressed.
+        # `_start_calibration` reassigns it to whichever routine the hotkey
+        # selected (quick / detailed / multi-pose / validation).
         self.routine = quick_routine
+        # All routines that need scene_size + jump_gate wired before use.
+        self._all_routines = (quick_routine, detailed_routine,
+                              multipose_routine, validation_routine)
         self.overlay = overlay
         self.display = display
 
         # Per-frame mutable state, all owned by the App instance.
         self.last_pupil_center: Optional[np.ndarray] = None
         self.last_confidence: float = 0.0
+        # last_eye_frame is the CLEAN crop (saved into the dataset);
+        # last_eye_frame_annotated has the pupil ellipse / status drawings
+        # and feeds the display + the calibration preview.
         self.last_eye_frame: Optional[np.ndarray] = None
+        self.last_eye_frame_annotated: Optional[np.ndarray] = None
         self.last_scene_frame: Optional[np.ndarray] = None
         self._last_gate_log_ts: float = 0.0
 
@@ -86,18 +97,22 @@ class App:
         if self.scene_cam is not None:
             print(f"Scene cam: {self.scene_cam.width}x{self.scene_cam.height}")
             scene_size = (self.scene_cam.width, self.scene_cam.height)
-            self.quick_routine.scene_size = scene_size
-            self.detailed_routine.scene_size = scene_size
+            for routine in self._all_routines:
+                routine.scene_size = scene_size
 
-        self.quick_routine.jump_gate = self.jump_gate
-        self.detailed_routine.jump_gate = self.jump_gate
+        for routine in self._all_routines:
+            routine.jump_gate = self.jump_gate
         self.display.open()
 
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
+              "'m' = multi-pose calibrate, 'v' = validation capture, "
               "'l' = load calibration, 'r' = reset pupil 3D model, "
               "'q' = quit, space = pause")
         print("Scene exposure: '[' / ']' = darker / brighter (fine), "
-              "'{' / '}' = darker / brighter (coarse)")
+              "'{' / '}' = darker / brighter (coarse) — also works during "
+              "calibration")
+        print("During calibration: Esc = abort the current point and retry, "
+              "'p' = camera preview, '-' / '=' = marker brightness")
 
         try:
             self._loop()
@@ -143,7 +158,9 @@ class App:
                 ext_frame = self.scene_cam.read()
                 if ext_frame is not None:
                     self.last_scene_frame = ext_frame.copy()
-                    self.target_mapper.update_marker_count(self.last_scene_frame)
+                    # One ArUco detection per frame, cached — the routine's
+                    # tick() reuses it via cached_homography().
+                    self.target_mapper.process_frame(self.last_scene_frame)
 
                     gaze_xy = None
                     if self.mapper.is_fitted() and not self.routine.is_active:
@@ -151,6 +168,11 @@ class App:
                     self.display.show_scene(ext_frame, gaze_xy)
 
             if self.routine.is_active and self.overlay.is_open():
+                self.overlay.exposure_status = self._exposure_overlay_text()
+                self.overlay.pupil_ok = self.last_pupil_center is not None
+                if self.overlay.preview_enabled:
+                    self.overlay.preview_scene = self._annotated_scene_preview()
+                    self.overlay.preview_eye = self._eye_preview()
                 self.overlay.render(self.routine)
                 self.overlay.pump()
 
@@ -221,7 +243,39 @@ class App:
             cv2.putText(frame, exposure_text, (10, 38),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1)
 
+        self.last_eye_frame_annotated = frame
         self.display.show_eye(frame)
+
+    def _annotated_scene_preview(self, max_width: int = 560
+                                 ) -> Optional[np.ndarray]:
+        """Scene-cam view for the calibration overlay preview: clipped
+        (blown-out) pixels tinted solid red, detected markers outlined,
+        downscaled. The tint is applied before the outlines so a marker
+        drowning in bloom shows red with no green box around it."""
+        if self.last_scene_frame is None:
+            return None
+        preview = self.last_scene_frame.copy()
+        clipped = preview.max(axis=2) >= 250
+        preview[clipped] = (0, 0, 255)
+        self.target_mapper.draw_cached_detections(preview)
+        h, w = preview.shape[:2]
+        if w > max_width:
+            preview = cv2.resize(preview,
+                                 (max_width, int(h * max_width / w)),
+                                 interpolation=cv2.INTER_AREA)
+        return preview
+
+    def _eye_preview(self, max_width: int = 380) -> Optional[np.ndarray]:
+        """Downscaled annotated eye frame (pupil ellipse + status drawings)
+        for the calibration overlay preview."""
+        frame = self.last_eye_frame_annotated
+        if frame is None:
+            return None
+        h, w = frame.shape[:2]
+        if w <= max_width:
+            return frame
+        return cv2.resize(frame, (max_width, int(h * max_width / w)),
+                          interpolation=cv2.INTER_AREA)
 
     def _predict_gaze_scene_xy(self) -> Optional[tuple]:
         """Return (x, y) in scene-cam pixels, smoothed and clipped, or None
@@ -250,14 +304,26 @@ class App:
         elif key == 'c':
             if not self.routine.is_active:
                 self._start_calibration(self.quick_routine)
+            elif self.routine.awaiting_pose:
+                self.routine.begin_next_pose()
             elif not self.routine.is_collecting:
                 self.routine.begin_capture()
         elif key == 'd':
             if not self.routine.is_active:
                 self._start_calibration(self.detailed_routine)
+        elif key == 'm':
+            if not self.routine.is_active:
+                self._start_calibration(self.multipose_routine)
+        elif key == 'v':
+            if not self.routine.is_active:
+                self._start_calibration(self.validation_routine)
         elif key == 's':
             if self.routine.is_active:
                 self.routine.skip()
+        elif key == 'esc':
+            # Abort the in-progress fixation, stay on the same point
+            # (no-op unless collecting).
+            self.routine.abort_capture()
         elif key == 'r':
             self.pupil.reset()
             print("Pupil 3D model reset — give it ~30s to reconverge.")
@@ -269,6 +335,13 @@ class App:
             self._nudge_exposure(-1, EXPOSURE_STEP_COARSE)
         elif key == '}':
             self._nudge_exposure(+1, EXPOSURE_STEP_COARSE)
+        elif key == '-':
+            self.overlay.nudge_marker_white(-1)
+        elif key == '=':
+            self.overlay.nudge_marker_white(+1)
+        elif key == 'p':
+            if self.routine.is_active:
+                self.overlay.toggle_preview()
         return True
 
     # ---- exposure controls (scene cam only) ---------------------------------
