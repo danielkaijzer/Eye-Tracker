@@ -31,13 +31,17 @@ $fn = 60;
 // ---------------- PCB / camera board (MEDIUM confidence) ----------------
 pcb_size        = 38;    // UC-844 Rev.B board is 38x38mm square
 pcb_thickness   = 1.6;   // measured ~1/16" at the bare edges
-hole_dia        = 3.0;   // corner hole diameter, measured "just under 1/8in"
+hole_dia        = 2.85;  // corner hole diameter (HIGH - measured via pixel analysis of a sharp photo)
 
-// ---------------- corner mounting holes (LOW confidence - verify!) ------
-// Board silkscreen mentions hole patterns compatible with 34x34 and 28x28mm
-// pitches. Only 4 real plated corner holes exist (confirmed from photos —
-// the other 6 small holes are via-stitching on the ground plane, not for
-// screws). Measure your actual board before printing; swap the value below.
+// ---------------- corner mounting holes (HIGH confidence, measured) -----
+// Two real, plated corner-hole patterns exist (measured via circle detection
+// on a sharp photo, cross-checked against all 4 sides of each square):
+// 4 outer holes (closer to the physical corners) at a 34.0mm pitch, and 4
+// inner holes at a 28.0mm pitch - matches the "compatible with 34x34,
+// 28x28mm" note from the board's own datasheet/silkscreen. This design
+// targets the outer/34mm pattern. There are also small via-stitching holes
+// elsewhere on the board (confirmed separately, not at these corner
+// positions) that are not for screws.
 hole_pitch      = 34;
 insert_hole_dia = 3.6;   // pilot hole for an M2.5 heat-set insert - match your insert's spec
 insert_boss_dia = 7.0;   // outer diameter of the printed boss around each insert
