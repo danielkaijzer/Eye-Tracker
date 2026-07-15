@@ -9,6 +9,12 @@
 //     file's two clip solids)
 // Everything else here is new, sized for the UC-844 board.
 //
+// Frame shape: an open picture-frame (thin rim hugging the PCB edges, hollow
+// in the middle - no solid back) with a diagonal braced pad at each corner
+// carrying the mounting screw. The camera is tilted so the pocket opening
+// faces back toward the glasses clips (inward, toward the eye) rather than
+// away from them.
+//
 // Confidence levels on the numbers below, so you know what to double check
 // before printing:
 //   HIGH   - measured directly from the STEP file geometry (tilt angle, clip
@@ -34,24 +40,21 @@ hole_dia        = 3.0;   // corner hole diameter, measured "just under 1/8in"
 // screws). Measure your actual board before printing; swap the value below.
 hole_pitch      = 34;
 insert_hole_dia = 3.6;   // pilot hole for an M2.5 heat-set insert - match your insert's spec
-insert_boss_dia = 7.0;   // outer diameter of the printed post around each insert
+insert_boss_dia = 7.0;   // outer diameter of the printed boss around each insert
+corner_pad_margin = 1.0; // extra solid margin kept around each boss inside its corner pad
 
-// ---------------- pocket-frame (addresses PCB slop from the old mount) --
-frame_wall         = 3.0;   // frame material around the PCB on the straight edges
-floor_thickness    = 1.2;   // solid floor thickness under the PCB pocket
-register_depth     = 1.0;   // height of the snug "registration" zone, measured up from the floor
+// ---------------- open picture-frame (addresses PCB slop from the old mount) --
+// Just a rim hugging the 4 edges + 4 corner pads - no solid back, so airflow
+// behind the PCB (per NOTES.md) is inherent rather than needing perforation.
+frame_wall         = 3.0;   // rim material around the PCB on the straight edges
+register_depth     = 1.0;   // height of the snug "registration" zone, measured from the bottom
 register_clearance = 0.10;  // per-side clearance in the registration zone - tight, kills slide/rotation
 lead_in_depth      = max(pcb_thickness - register_depth, 0.6); // looser zone above it, eases drop-in
 lead_in_clearance  = 0.30;  // per-side clearance in the lead-in zone
 corner_relief_r    = 0.6;   // extra rounding at the 4 inside pocket corners (clears PCB corners/printed fillets)
 
 frame_outer  = pcb_size + 2*frame_wall;
-frame_height = floor_thickness + register_depth + lead_in_depth;
-
-// ---------------- back perforation (airflow, per NOTES.md) --------------
-perf_hole_dia = 2.0;
-perf_pitch    = 4.5;
-perf_margin   = 5.0;   // keep-out margin from the insert bosses and frame edges
+frame_height = register_depth + lead_in_depth;
 
 // ---------------- glasses attachment clip --------------------------------
 // Measured from 3d-files/bottom mount/v1 various internal eye cams.step,
@@ -106,48 +109,62 @@ module pcb_pocket() {
     }
 }
 
-module corner_bosses() {
-    for (x = [-1, 1], y = [-1, 1])
-        translate([x * hole_pitch/2, y * hole_pitch/2, 0])
-            cylinder(h = floor_thickness + register_depth, d = insert_boss_dia);
-}
-
-module corner_gussets() {
-    gusset_h = floor_thickness + register_depth;
-    gusset_leg = frame_wall + 3;
-    for (x = [-1, 1], y = [-1, 1])
-        translate([x * frame_outer/2, y * frame_outer/2, 0])
-            linear_extrude(height = gusset_h)
-                polygon([[0, 0], [-x * gusset_leg, 0], [0, -y * gusset_leg]]);
-}
-
-module back_perforation() {
-    n = floor(frame_outer / perf_pitch);
-    for (i = [0 : n])
-        for (j = [0 : n]) {
-            px = -frame_outer/2 + perf_margin + i * perf_pitch;
-            py = -frame_outer/2 + perf_margin + j * perf_pitch;
-            if (px < frame_outer/2 - perf_margin && py < frame_outer/2 - perf_margin
-                && abs(px) < pcb_size/2 - perf_margin/2 && abs(py) < pcb_size/2 - perf_margin/2)
-                translate([px, py, -0.5])
-                    cylinder(h = floor_thickness + 1, d = perf_hole_dia);
+// One corner's 2D footprint, built for the +x/+y corner then mirrored into
+// place: a square pad reaching in from the frame's outer corner, chamfered
+// diagonally on its inner corner (the brace shape from the sketch), plus an
+// explicit boss disk so the insert hole always has full material around it
+// regardless of the chamfer.
+module corner_pad_2d(xs, ys) {
+    reach    = hole_pitch/2 - insert_boss_dia/2 - corner_pad_margin;
+    pad_span = frame_outer/2 - reach;
+    chamfer  = pad_span * 0.6;
+    mirror([xs < 0 ? 1 : 0, 0, 0])
+    mirror([0, ys < 0 ? 1 : 0, 0])
+    union() {
+        difference() {
+            translate([reach, reach])
+                square([pad_span, pad_span]);
+            translate([reach, reach])
+                polygon([[0, 0], [chamfer, 0], [0, chamfer]]);
         }
+        translate([hole_pitch/2, hole_pitch/2])
+            circle(d = insert_boss_dia);
+    }
+}
+
+module corner_pad(xs, ys) {
+    difference() {
+        linear_extrude(height = frame_height)
+            corner_pad_2d(xs, ys);
+        translate([xs * hole_pitch/2, ys * hole_pitch/2, -0.5])
+            cylinder(h = frame_height + 1, d = insert_hole_dia);
+    }
+}
+
+// Solid tab sticking out from the frame's near edge, toward the spine. The
+// frame's own middle is hollow (open frame), so without this the spine would
+// only ever meet the frame at its hollow center - this tab is what the spine
+// actually fuses into.
+tab_len   = 4;
+tab_width = spine_width;
+
+module frame_tab() {
+    translate([-frame_outer/2 - tab_len, -tab_width/2, 0])
+        cube([tab_len, tab_width, frame_height]);
 }
 
 module frame_body() {
-    difference() {
-        union() {
+    union() {
+        // open rim: hugs the PCB edges, hollow in the middle, no solid back
+        difference() {
             linear_extrude(height = frame_height)
                 square([frame_outer, frame_outer], center = true);
-            corner_bosses();
-            corner_gussets();
-        }
-        translate([0, 0, floor_thickness])
             pcb_pocket();
+        }
+        // 4 diagonal-braced corner pads carrying the mounting screws
         for (x = [-1, 1], y = [-1, 1])
-            translate([x * hole_pitch/2, y * hole_pitch/2, -0.5])
-                cylinder(h = frame_height + 1, d = insert_hole_dia);
-        back_perforation();
+            corner_pad(x, y);
+        frame_tab();
     }
 }
 
@@ -188,9 +205,16 @@ module mount_assembly() {
     translate([clip_len - overlap, -spine_width/2, (clip_height - spine_thick)/2])
         cube([spine_length + 2 * overlap, spine_width, spine_thick]);
 
+    // tilt is negative so the pocket opening (where the PCB/lens faces) tilts
+    // back toward the spine and glasses clips - i.e. inward toward the eye -
+    // instead of outward away from the face.
+    // Rotating/translating is anchored at the tab's midpoint (not the frame's
+    // own hollow center) so the tab lands solidly inside the spine regardless
+    // of tilt angle/sign.
     translate([clip_len + spine_length, 0, clip_height/2])
-        rotate([0, tilt_angle, 0])
-            frame_body();
+        rotate([0, -tilt_angle, 0])
+            translate([frame_outer/2 + tab_len/2, 0, -frame_height/2])
+                frame_body();
 }
 
 mount_assembly();
