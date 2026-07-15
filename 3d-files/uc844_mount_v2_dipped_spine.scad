@@ -96,7 +96,14 @@ clip_spacing    = 15;    // LOW - distance between the two clips; verify against
 tilt_angle    = 60;   // degrees - matches the old mount (NOTES.md + STEP file DIRECTION vectors)
 spine_len_1   = 12;   // clip-side segment, stays horizontal/in-line with the clips
 spine_len_2   = 12;   // frame-side segment, angled down by dip_angle before the frame attaches
-dip_angle     = 25;   // degrees the frame-side segment droops below horizontal - tune during test-fit
+// degrees the frame-side segment droops below horizontal. Solved (not
+// guessed) from a real measurement: the old camera's lens sits ~3/8in
+// (9.5mm) above the clip, and with tilt_angle fixed at 60 (matching the old
+// mount), 29 degrees of dip puts this frame's PCB/lens centroid at the same
+// ~9.5mm height above the clip - re-solve if you re-measure or change
+// spine_len_1/spine_len_2/tilt_angle above, since dip_angle depends on all of
+// them together.
+dip_angle     = 29;
 spine_width   = clip_spacing + clip_wid + 2;   // spans both clips fully (plus margin) so the spine fuses into one solid part, not two loose ones
 spine_thick   = 4;
 
