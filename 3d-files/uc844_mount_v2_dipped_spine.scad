@@ -17,10 +17,14 @@
 // same height/position relative to the glasses as the old mount.
 //
 // There's no hard measurement backing dip_angle/spine_len_1/spine_len_2
-// below - the old mount's exact clip-to-lens offset was never captured
-// (only its overall bounding box), so these are starting guesses meant to be
-// tuned during test-fit, ideally by comparing against the old mount worn
-// side by side.
+// below. The old mount's STEP file was checked for this directly - it turned
+// out to be a side-by-side comparison layout of 5 candidate camera-bracket
+// designs (arranged in a 2-column x 3-row grid) with no arm/spine modeled
+// between any bracket and the clips, so their relative positions in that
+// file aren't real assembled geometry and can't be used as ground truth.
+// These are starting guesses meant to be tuned during test-fit - ideally by
+// measuring the real old mount (clip's wire-grip point to lens center) and
+// solving for the dip_angle/spine lengths that match it.
 //
 // Confidence levels on the numbers below, so you know what to double check
 // before printing:
@@ -219,9 +223,14 @@ module mount_assembly() {
 
     // segment 2 + frame: both hang off the end of segment 1, rotated down by
     // dip_angle together, so the frame tilt (tilt_angle) is still measured
-    // relative to segment 2's own direction, not the horizontal
+    // relative to segment 2's own direction, not the horizontal.
+    // Sign is opposite the frame's own tilt rotation below - tilt_angle and
+    // dip_angle both rotate about Y, and they need to counteract each other
+    // (dip pulling the frame back down) rather than compound (which would
+    // just tilt the frame even further up/out - confirmed by tracing the
+    // actual centroid coordinates through both rotations).
     translate([clip_len + spine_len_1, 0, clip_height/2])
-        rotate([0, -dip_angle, 0]) {
+        rotate([0, dip_angle, 0]) {
             translate([-overlap, -spine_width/2, -spine_thick/2])
                 cube([spine_len_2 + 2 * overlap, spine_width, spine_thick]);
 
