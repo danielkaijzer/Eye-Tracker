@@ -39,7 +39,7 @@
 
 $fn = 60;
 
-show = "assembly";   // "assembly" (mount + rod + cap) | "print" (bodies apart)
+show = "assembly";   // "assembly" (mount+rod+cap seated) | "exploded" (cap lifted, rod dropping in) | "print" (bodies apart)
 
 // ---------------- PCB / camera board (MEDIUM confidence) ----------------
 pcb_size        = 38;    // UC-844 Rev.B board is 38x38mm square
@@ -278,6 +278,17 @@ if (show == "assembly") {
     // the base channel, screw holes line up.
     color("LightSteelBlue")
         translate([0, 0, clamp_half_h])
+            clamp_half(true);
+} else if (show == "exploded") {
+    // Same as assembly but the cap is lifted straight up and the rod floats
+    // above the OPEN groove in the base - showing that the rod drops in from
+    // the top (the only way to capture a continuous, no-free-end rim) and the
+    // cap then bolts down over it. No threading through a closed hole.
+    ex = 16;   // explode gap
+    mount_body();
+    translate([0, 0, ex]) rod_mock();
+    color("LightSteelBlue")
+        translate([0, 0, clamp_half_h + 2*ex])
             clamp_half(true);
 } else {
     // print layout: the two printable bodies, apart. (The mount still prints
