@@ -55,8 +55,15 @@ peg_length = 5.0;   // reaches past the pinch into the pocket
 clamp_insert_hole_dia = 3.6;   // pilot hole for an M2.5 heat-set insert - match your insert's spec
 clamp_insert_boss_dia = 7.0;
 clamp_wall            = 2.0;   // material around the rod channel, and above/below the screw bosses
-clamp_length          = clip_spacing + 10;      // spans both peg positions with margin
-clamp_screw_offset    = clamp_length/2 - 4;      // screw positions from center, along the clamp's length
+// Screw positions are pushed well past the pegs, and the channel (below) is
+// kept short of both - the first version centered the channel on the same
+// axis as everything else and ran it the FULL length of the clamp, which
+// cut straight through the screw bosses, leaving only thin broken crescents
+// instead of solid material. Keeping the three features in separate Y zones
+// avoids that.
+clamp_screw_offset    = 13;   // screw positions from center, along the clamp's length
+channel_length        = 12;   // rod channel length - short and centered, clear of the pegs (at +-7.5) and the screw bosses
+clamp_length          = 38;   // long enough to comfortably fit channel + pegs + screw bosses with margin between each
 
 channel_r_a = rod_dia_a/2;   // channel half-width (unsplit axis)
 channel_r_b = rod_dia_b/2;   // channel half-depth (split axis)
@@ -73,9 +80,10 @@ module oval_profile(ra, rb) {
         circle(r = 1);
 }
 
-// One half of the clamp: a block with a half-oval notch in its top face
-// (running the full length) and 2 vertical screw holes. is_cap flips the
-// notch to the bottom face and uses clearance holes instead of insert bosses.
+// One half of the clamp: a block with a short half-oval notch in its top
+// face (centered, NOT running the full length - kept clear of the screw
+// bosses) and 2 vertical screw holes. is_cap flips the notch to the bottom
+// face and uses clearance holes instead of insert bosses.
 module clamp_half(is_cap) {
     difference() {
         union() {
@@ -88,11 +96,13 @@ module clamp_half(is_cap) {
                     translate([0, y, 0])
                         cylinder(h = half_height + 3, d = clamp_insert_boss_dia);
         }
-        // rod channel: half oval, full length, sitting exactly at the
-        // parting face so the two halves' notches meet to form a full oval
+        // rod channel: half oval, short and centered, sitting exactly at the
+        // parting face so the two halves' notches meet to form a full oval.
+        // Length is deliberately much less than clamp_length so it can't
+        // reach the screw bosses.
         translate([0, 0, is_cap ? 0 : half_height])
             rotate([90, 0, 0])
-                linear_extrude(height = clamp_length + 1, center = true)
+                linear_extrude(height = channel_length, center = true)
                     oval_profile(channel_r_a, channel_r_b);
         // screw holes: through-clearance in the cap, pilot hole in the base
         for (y = [-clamp_screw_offset, clamp_screw_offset])
@@ -101,10 +111,14 @@ module clamp_half(is_cap) {
     }
 }
 
+// Vertical boss on the base's top face - not a horizontal cantilever like
+// the first version (which printed as an unsupported overhang and came out
+// broken/stringy). Print orientation doesn't need to match final assembly
+// orientation for a part this small - just rotate it by hand when pushing
+// it into the mount's keyhole slot.
 module peg(y) {
-    translate([clamp_width/2, y, half_height/2])
-        rotate([0, 90, 0])
-            cylinder(h = peg_length, d = peg_dia);
+    translate([0, y, half_height])
+        cylinder(h = peg_length, d = peg_dia);
 }
 
 module clamp_base() {
