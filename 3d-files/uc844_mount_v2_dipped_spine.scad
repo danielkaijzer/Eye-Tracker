@@ -219,9 +219,8 @@ module glasses_clip() {
 }
 
 module mount_assembly() {
-    // extra overlap so the spine segments solidly fuse into the clips, into
-    // each other, and into the frame, instead of merely touching at
-    // zero-width boundaries
+    // extra overlap so the spine fuses solidly into the clips at the near
+    // end (unrotated, so no wedge risk there)
     overlap = 2;
 
     for (dy = [-clip_spacing/2, clip_spacing/2])
@@ -232,6 +231,22 @@ module mount_assembly() {
     translate([clip_len - overlap, -spine_width/2, (clip_height - spine_thick)/2])
         cube([spine_len_1 + overlap, spine_width, spine_thick]);
 
+    seg1_end = [clip_len + spine_len_1, 0, clip_height/2];
+
+    // Joint 1 (dip bend): hull between segment 1's actual end face and
+    // segment 2's actual start face - not an overlap hack. Extending either
+    // box past the joint (as an earlier version did) pokes a wedge out at an
+    // angle, since the two faces aren't coplanar - hull() gives the minimal
+    // clean fillet between the two true mating faces instead.
+    hull() {
+        translate(seg1_end + [-0.01, -spine_width/2, -spine_thick/2])
+            cube([0.01, spine_width, spine_thick]);
+        translate(seg1_end)
+            rotate([0, dip_angle, 0])
+                translate([0, -spine_width/2, -spine_thick/2])
+                    cube([0.01, spine_width, spine_thick]);
+    }
+
     // segment 2 + frame: both hang off the end of segment 1, rotated down by
     // dip_angle together, so the frame tilt (tilt_angle) is still measured
     // relative to segment 2's own direction, not the horizontal.
@@ -240,10 +255,26 @@ module mount_assembly() {
     // (dip pulling the frame back down) rather than compound (which would
     // just tilt the frame even further up/out - confirmed by tracing the
     // actual centroid coordinates through both rotations).
-    translate([clip_len + spine_len_1, 0, clip_height/2])
+    translate(seg1_end)
         rotate([0, dip_angle, 0]) {
-            translate([-overlap, -spine_width/2, -spine_thick/2])
-                cube([spine_len_2 + 2 * overlap, spine_width, spine_thick]);
+            translate([0, -spine_width/2, -spine_thick/2])
+                cube([spine_len_2, spine_width, spine_thick]);
+
+            // Joint 2 (tilt bend): same fix - hull segment 2's real end face
+            // against the frame's connector tab's real far-tip face, instead
+            // of letting the tab poke through at the 60 degree tilt angle.
+            // (This was the dominant source of the protrusion: the old code
+            // left an ~1.9mm gap between these two faces, closed only by the
+            // tab overlapping sloppily rather than meeting flush.)
+            hull() {
+                translate([spine_len_2 - 0.01, -spine_width/2, -spine_thick/2])
+                    cube([0.01, spine_width, spine_thick]);
+                translate([spine_len_2, 0, 0])
+                    rotate([0, -tilt_angle, 0])
+                        translate([frame_outer/2 + tab_len/2, 0, -frame_height/2])
+                            translate([-frame_outer/2 - tab_len, -tab_width/2, 0])
+                                cube([0.01, tab_width, frame_height]);
+            }
 
             // tilt is negative so the pocket opening (where the PCB/lens
             // faces) tilts back toward the spine and glasses clips - i.e.
