@@ -34,7 +34,9 @@
 //   MEDIUM - pcb_size, pcb_thickness, hole_dia (from photos/ruler)
 //   LOW    - dip_angle (approximate; the rod grip point moved slightly vs the
 //            old clip grip point, so re-check lens height on test-fit),
-//            clamp screw size/offset, channel clearance - all tune-on-fit
+//            clamp screw size/offset - tune-on-fit. NOTE the clamp is
+//            intentionally forgiving to rod-size error (see the rod clamp
+//            section), so the 5x4mm rod measurement does NOT need to be exact.
 // ============================================================================
 
 $fn = 60;
@@ -74,18 +76,31 @@ rod_z = 4.0;   // up-down thickness, seen looking at the glasses front-on
 // ---------------- rod clamp (integrated lower half + separate cap) ------
 // The clamp splits horizontally: base = lower half (fused to the spine/mount),
 // cap = upper half (separate print). Two screws sit fore and aft of the rod
-// and pull the cap down onto the base, squeezing the rod between the two
-// half-oval channels. Inserts live in the base; the cap holes are clearance.
-clamp_channel_clearance = 0.15;   // per-side slop so the rod actually seats
-clamp_wall              = 2.0;    // material below/above the rod channel
+// and pull the cap down onto the base. Inserts live in the base; cap holes are
+// clearance.
+//
+// FORGIVING BY DESIGN: the bore is cut deliberately SHALLOWER (in the split /
+// Z direction) than the measured rod, so the rod always stands proud of the
+// parting line and the two halves pinch the ROD - they never bottom out flat
+// against each other first. So a measurement error just changes the leftover
+// gap between the halves, not whether it grips: lay the rod in, set the cap
+// on, tighten the two screws, done. It tolerates the rod being up to ~1mm
+// THINNER than measured (down to 2*channel_r_z, where the gap closes to zero)
+// and several mm THICKER (limited only by screw length). Width (X) gets a
+// little clearance so it always drops in; the real grip is the top/bottom Z
+// pinch plus friction.
+clamp_bore_x_clear = 0.3;   // per-side width slop - rod always drops into the groove
+clamp_bore_squeeze = 0.5;   // each half's groove is this much shallower than the rod's half-thickness -> rod stands proud by this per side and gets pinched
+clamp_wall         = 2.5;   // material below the groove (also makes half height == spine_thick)
 clamp_insert_hole_dia   = 3.6;    // base: heat-set insert pilot (cap: clearance)
 clamp_insert_boss_dia   = 7.0;
 clamp_screw_offset      = 7.0;    // X distance from rod center to each screw
 
-channel_r_x = rod_x/2 + clamp_channel_clearance;
-channel_r_z = rod_z/2 + clamp_channel_clearance;
+channel_r_x = rod_x/2 + clamp_bore_x_clear;    // bore half-width - hugs the rod sides with slight slop
+channel_r_z = rod_z/2 - clamp_bore_squeeze;    // bore half-height - UNDERSIZED so the rod stands proud and gets pinched
 
 clamp_half_h = channel_r_z + clamp_wall;                       // height of each half
+clamp_gap    = max(rod_z - 2*channel_r_z, 0);                  // leftover gap between the halves at the nominal rod size (the clamp's "give")
 clamp_len_x  = 2*clamp_screw_offset + clamp_insert_boss_dia + 2; // fore boss .. aft boss + margin
 
 // ---------------- spine / camera tilt -----------------------------------
@@ -273,11 +288,11 @@ module mount_body() {
 
 if (show == "assembly") {
     mount_body();
-    rod_mock();
-    // cap set down on top of the base: its channel (on its bottom face) meets
-    // the base channel, screw holes line up.
+    // rod centered between the two groove faces; because the bore is
+    // undersized the halves stay clamp_gap apart, pinching the rod.
+    translate([0, 0, clamp_gap/2]) rod_mock();
     color("LightSteelBlue")
-        translate([0, 0, clamp_half_h])
+        translate([0, 0, clamp_half_h + clamp_gap])
             clamp_half(true);
 } else if (show == "exploded") {
     // Same as assembly but the cap is lifted straight up and the rod floats
