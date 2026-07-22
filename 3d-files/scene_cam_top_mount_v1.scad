@@ -36,9 +36,12 @@ hole_dia      = 2.2;    // Ø2.2 drilled hole (Ø3.2 is the pad); clears an M2 s
 hole_spacing  = 4.0;    // center-to-center, across the width, symmetric about center
 hole_from_end = 2.0;    // hole-center distance from the mounting-hole end edge
 
-// Optional third mounting hole near the connector end (datasheet shows a Ø2.2):
-third_hole      = false;
+// Third mounting hole near the connector end (datasheet Ø2.2) -> 3-point clamp:
+third_hole      = true;
 third_from_conn = 10.2; // its center distance from the connector-end edge
+third_y_offset  = -2.0; // offset from the width centerline (datasheet "2.00",
+                        // lined up under one of the two end holes; flip sign or
+                        // set 0 if your board's hole sits elsewhere)
 
 /* =========================================================================
    CLIP INTERFACE  (from the current bar's STEP file - fixed)
@@ -83,6 +86,11 @@ board_top= plate_t;
 hole_x   = pcb_x0 + pcb_len - hole_from_end;
 hole_ys  = [ plate_h/2 - hole_spacing/2, plate_h/2 + hole_spacing/2 ];
 third_x  = pcb_x0 + third_from_conn;
+third_y  = plate_h/2 + third_y_offset;
+
+// airflow window x-span (kept clear of the third hole so it has a solid seat)
+win_x0 = third_hole ? max(pcb_x0 + win_end_inset, third_x + 4) : pcb_x0 + win_end_inset;
+win_x1 = pcb_x0 + pcb_len - win_end_inset;
 
 // clip ears on the rod-side long edge (y = 0), at each end
 clip_xs   = [ clip_end_margin, clip_end_margin + clip_hole_pitch ];
@@ -106,7 +114,7 @@ module pcb_mock() {
                 translate([hole_x - pcb_x0, y - pcb_y0, -1])
                     cylinder(h = board_thick + 2, d = hole_dia);
             if (third_hole)
-                translate([third_x - pcb_x0, pcb_width/2, -1])
+                translate([third_x - pcb_x0, pcb_width/2 + third_y_offset, -1])
                     cylinder(h = board_thick + 2, d = hole_dia);
         }
     color("Black")     translate([cam_x, plate_h/2, board_top]) cylinder(h = lens_protrude, d = 5.68);
@@ -129,8 +137,8 @@ module top_mount() {
             cube([pcb_len + 2*pocket_clear, pcb_width + 2*pocket_clear, board_thick + 10]);
 
         // airflow / component-relief window (clear of the screw pilots)
-        translate([pcb_x0 + win_end_inset, pcb_y0 + win_edge_inset, -1])
-            cube([pcb_len - 2*win_end_inset, pcb_width - 2*win_edge_inset, plate_t + 2]);
+        translate([win_x0, pcb_y0 + win_edge_inset, -1])
+            cube([win_x1 - win_x0, pcb_width - 2*win_edge_inset, plate_t + 2]);
 
         // connector / cable relief at the -X end
         translate([-1, plate_h/2 - conn_notch_w/2, pocket_z])
@@ -145,7 +153,7 @@ module top_mount() {
             translate([hole_x, y, -1])
                 cylinder(h = plate_t + 2, d = use_insert ? insert_dia : screw_pilot_dia);
         if (third_hole)
-            translate([third_x, plate_h/2, -1])
+            translate([third_x, third_y, -1])
                 cylinder(h = plate_t + 2, d = use_insert ? insert_dia : screw_pilot_dia);
     }
 
