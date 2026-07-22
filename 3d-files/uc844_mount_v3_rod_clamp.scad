@@ -41,7 +41,11 @@
 
 $fn = 60;
 
-show = "assembly";   // "assembly" (mount+rod+cap seated) | "exploded" (cap lifted, rod dropping in) | "print" (bodies apart)
+// "assembly" (mount+rod+cap seated) | "exploded" (cap lifted, rod dropping in)
+// | "print" (both bodies apart, one STL) | "mount" (just the mount body)
+// | "cap" (just the clamp cap). Use "mount" and "cap" to export each piece to
+// its own STL so Cura imports them as independent objects.
+show = "assembly";
 
 // ---------------- PCB / camera board (MEDIUM confidence) ----------------
 pcb_size        = 38;    // UC-844 Rev.B board is 38x38mm square
@@ -305,8 +309,16 @@ if (show == "assembly") {
     color("LightSteelBlue")
         translate([0, 0, clamp_half_h + 2*ex])
             clamp_half(true);
+} else if (show == "mount") {
+    // just the mount body - export this to its own STL
+    mount_body();
+} else if (show == "cap") {
+    // just the clamp cap - export this to its own STL
+    clamp_half(true);
 } else {
-    // print layout: the two printable bodies, apart. (The mount still prints
+    // print layout: the two printable bodies, apart, in ONE STL. Handy for a
+    // quick look, but Cura imports it as a single object - use "mount" and
+    // "cap" above to get two independent STLs instead. (The mount still prints
     // rotated ~31 deg about Y to lay the frame flat, exactly as v2 did - do
     // that in the slicer, same as before.)
     mount_body();
