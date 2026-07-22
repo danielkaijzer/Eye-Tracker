@@ -2,17 +2,19 @@
 // scene_cam_top_mount_v1.scad
 // Replacement backing mount ("blue bar") for the HUAQUE HQ-L103 SCENE camera.
 //
-// Goal: stop the PCB from shifting by locating it on its OWN mounting holes,
-// while keeping the existing white rod clips completely unchanged.
+// Goals:
+//   * Lock the PCB down using its OWN mounting holes (no more shifting).
+//   * Reuse the existing white rod clips unchanged -> replicate the L-tab ears
+//     (a rounded ear at each end with a Ø3.2 clip hole at 64 mm pitch), taken
+//     from the current bar's STEP file.
 //
-// How it locks the board:
-//   1. A full-perimeter pocket (board outline + clearance) -> no slide/rotate.
-//   2. Two locating posts through the board's two end holes -> precise + no spin.
-//   3. Snap post-heads + two connector-end lips -> hold it flat, still removable.
-//   4. An open center window -> component clearance + airflow (per NOTES.md).
+// Retention: the board drops into a full-perimeter pocket (locates it), then
+// two M2 screws through its two end mounting holes clamp it flat to the plate.
+// The lens/LED/components face forward and stay fully exposed; a center window
+// gives component clearance + airflow (per NOTES.md).
 //
-// The clip interface (two Ø3.2 holes at 64 mm pitch) was extracted from the
-// existing STEP files, so the current white clips bolt straight on.
+// PCB dimensions are from the manufacturer datasheet (62 x 9 x 1.0 mm board;
+// two Ø2.2 holes 4.0 mm apart, 2.0 mm from the end).
 // ============================================================================
 
 /* =========================================================================
@@ -21,73 +23,80 @@
 show = "assembly";   // "assembly" | "exploded" | "mount" | "pcb"
 
 /* =========================================================================
-   >>> MEASURE THESE on your actual PCB with calipers. <<<
-   The values below are ESTIMATES read off your photos - confirm before print.
+   PCB  (from datasheet - measured)
    ========================================================================= */
-pcb_len       = 62.0;   // long dimension of the board          (measured)
-pcb_width     = 9.0;    // short dimension of the board         (measured)
-module_height = 5.68;   // OVERALL thickness incl. lens/components (measured).
-                        // Informational only - the front stays open so the
-                        // lens/LED/chips are exposed; nothing recesses this far.
-board_thick   = 1.6;    // BARE board edge thickness -> sets pocket depth and
-                        // snap/lip heights. Confirm this one (typical FR4 = 1.6).
+pcb_len       = 62.0;   // board length
+pcb_width     = 9.0;    // board width
+board_thick   = 1.0;    // bare PCB thickness ("1.0pcb" on the drawing)
+lens_protrude = 4.68;   // how far the camera module stands off the front face
+                        // (informational: the front is left open)
 
-// The two plated mounting holes are near ONE end, stacked across the width:
-hole_dia      = 2.1;    // diameter of each mounting hole
-hole_from_end = 3.0;    // hole-center distance from the nearest board end (lengthwise)
-hole_spacing  = 5.5;    // center-to-center across the width (must be < pcb_width)
+// Two plated mounting holes at ONE end (the camera is 32.5 mm from this end):
+hole_dia      = 2.2;    // Ø2.2 drilled hole (Ø3.2 is the pad); clears an M2 screw
+hole_spacing  = 4.0;    // center-to-center, across the width, symmetric about center
+hole_from_end = 2.0;    // hole-center distance from the mounting-hole end edge
+
+// Optional third mounting hole near the connector end (datasheet shows a Ø2.2):
+third_hole      = false;
+third_from_conn = 10.2; // its center distance from the connector-end edge
 
 /* =========================================================================
-   FIXED interface to the existing white clips (extracted from the STEP files).
-   Do NOT change clip_hole_dia / clip_hole_pitch or the clips won't line up.
+   CLIP INTERFACE  (from the current bar's STEP file - fixed)
+   The white clips bolt to a rounded "ear" at each end with a Ø3.2 hole.
    ========================================================================= */
-clip_hole_dia   = 3.2;   // Ø3.2 clearance, matches current bar + clips
-clip_hole_pitch = 64.0;  // 64 mm between the two clip screws
-clip_end_margin = 3.0;   // clip holes sit 3 mm in from each bar end
+clip_hole_dia   = 3.2;   // clip screw clearance hole
+clip_hole_pitch = 64.0;  // distance between the two clip screws
+clip_end_margin = 3.0;   // ears sit 3 mm in from each bar end
 bar_len         = clip_hole_pitch + 2*clip_end_margin;   // -> 70 mm
+clip_ear_dia    = 7.0;   // rounded ear around the clip hole
+clip_ear_drop   = 2.0;   // how far the ear's hole sits beyond the rod-side edge
+                         //   (tune this so the clips reach the rod: test-fit)
 
 /* =========================================================================
-   PLATE + RETENTION (tunable)
+   PLATE + RETENTION  (tunable)
    ========================================================================= */
-frame         = 2.5;    // border of plate around PCB on the long edges
-plate_t       = 3.0;    // backing-plate thickness
-pocket_clear  = 0.30;   // gap around PCB in the pocket (per side)
-post_clear    = 0.15;   // gap around locating posts in the holes (per side)
-post_extra    = 1.4;    // how far the posts stand above the board top
-post_snap     = true;   // add a chamfered snap head to the posts
-snap_lip      = 0.4;    // how far the snap head overhangs the hole
-win_end_inset = 8.0;    // window kept this far from each PCB end (solid seat)
-win_edge_inset= 2.0;    // window kept this far from each long edge
-lip_reach     = 1.0;    // connector-end hold-down lip overhang
-lip_w         = 3.0;    // width of each connector-end lip
-lip_h         = 1.0;    // thickness of each lip
-tab_gap       = 0.15;   // clearance under snap features (over board top)
+frame          = 2.5;    // border of plate around the PCB on the long edges
+plate_t        = 3.0;    // backing-plate thickness
+pocket_clear   = 0.30;   // gap around the PCB in the pocket (per side)
+use_insert     = false;  // false = M2 self-tap into plastic; true = heat-set insert
+screw_pilot_dia= 1.6;    // pilot for an M2 self-tapping screw
+insert_dia     = 3.2;    // hole for an M2 brass heat-set insert
+win_end_inset  = 8.0;    // airflow window kept this far from each PCB end
+win_edge_inset = 2.0;    // airflow window kept this far from each long edge
+conn_notch_w   = 6.0;    // cable/connector relief width at the connector end
+lip_reach      = 1.0;    // connector-end hold-down lip overhang
+lip_w          = 3.0;    // width of each connector-end lip
+lip_h          = 1.0;    // thickness of each lip
 
 $fn = 48;
 
 /* =========================================================================
    DERIVED
    ========================================================================= */
-plate_h  = pcb_width + 2*frame;          // overall bar height (~13.5 mm)
-pcb_x0   = (bar_len - pcb_len)/2;         // PCB left edge (centered)
-pcb_y0   = (plate_h - pcb_width)/2;       // PCB bottom edge (centered)
-pocket_z = plate_t - board_thick;           // pocket floor height
-board_top= plate_t;                       // PCB top is flush with plate top
+plate_h  = pcb_width + 2*frame;         // ~14 mm
+pcb_x0   = (bar_len - pcb_len)/2;        // PCB left edge (centered) -> 4
+pcb_y0   = (plate_h - pcb_width)/2;      // PCB bottom edge -> 2.5
+pocket_z = plate_t - board_thick;        // pocket floor -> 2.0
+board_top= plate_t;
 
-// mounting-hole centers (near the +X end of the board)
+// +X end = mounting-hole end;  -X end = connector end
 hole_x   = pcb_x0 + pcb_len - hole_from_end;
 hole_ys  = [ plate_h/2 - hole_spacing/2, plate_h/2 + hole_spacing/2 ];
-post_d   = hole_dia - 2*post_clear;
+third_x  = pcb_x0 + third_from_conn;
 
-// clip-hole centers (ends, clear of the PCB)
-clip_xs  = [ clip_end_margin, clip_end_margin + clip_hole_pitch ];
-clip_y   = plate_h/2;
+// clip ears on the rod-side long edge (y = 0), at each end
+clip_xs   = [ clip_end_margin, clip_end_margin + clip_hole_pitch ];
+clip_ear_y = -clip_ear_drop;
+
+// datasheet feature positions (from the mounting-hole end), for the mock
+cam_x = hole_x - (32.5 - hole_from_end);   // camera 32.5 mm from that end
+led_x = hole_x - (12.5 - hole_from_end);   // LED  12.5 mm from that end
 
 /* =========================================================================
    MODULES
    ========================================================================= */
 
-// Visual stand-in for the scene PCB (with its two mounting holes + a lens bump)
+// Visual stand-in for the scene PCB (holes + lens + LED + connector)
 module pcb_mock() {
     color("DarkSlateGray")
     translate([pcb_x0, pcb_y0, pocket_z])
@@ -96,58 +105,56 @@ module pcb_mock() {
             for (y = hole_ys)
                 translate([hole_x - pcb_x0, y - pcb_y0, -1])
                     cylinder(h = board_thick + 2, d = hole_dia);
+            if (third_hole)
+                translate([third_x - pcb_x0, pcb_width/2, -1])
+                    cylinder(h = board_thick + 2, d = hole_dia);
         }
-    // lens bump on the FRONT face, to show which way the camera looks
-    color("Black")
-    translate([bar_len/2, plate_h/2, board_top])
-        cylinder(h = 2.5, d = 4);
+    color("Black")     translate([cam_x, plate_h/2, board_top]) cylinder(h = lens_protrude, d = 5.68);
+    color("Khaki")     translate([led_x, plate_h/2, board_top]) cube([3.5,3.5,1.2], center=true);
+    color("Gainsboro") translate([pcb_x0-4, plate_h/2, pocket_z]) cube([4, 6, 2.6]); // connector
 }
 
-// The backing mount itself
+// The backing mount
 module top_mount() {
-    union() {
-        difference() {
-            // ---- main plate ----
+    difference() {
+        union() {
             cube([bar_len, plate_h, plate_t]);
-
-            // ---- PCB pocket (recess so the board drops in flush) ----
-            translate([pcb_x0 - pocket_clear, pcb_y0 - pocket_clear, pocket_z])
-                cube([pcb_len + 2*pocket_clear,
-                      pcb_width + 2*pocket_clear,
-                      board_thick + 10]);
-
-            // ---- airflow / component-relief window (kept clear of posts) ----
-            translate([pcb_x0 + win_end_inset, pcb_y0 + win_edge_inset, -1])
-                cube([pcb_len - 2*win_end_inset,
-                      pcb_width - 2*win_edge_inset,
-                      plate_t + 2]);
-
-            // ---- clip screw holes (the interface to the white clips) ----
+            // clip ears (L-tabs) on the rod-side edge at each end
             for (x = clip_xs)
-                translate([x, clip_y, -1])
-                    cylinder(h = plate_t + 2, d = clip_hole_dia);
+                translate([x, clip_ear_y, 0]) cylinder(h = plate_t, d = clip_ear_dia);
         }
 
-        // ---- locating posts (through the board's own holes) ----
-        // start 0.6 mm below the pocket floor so they fuse to the plate.
-        for (y = hole_ys)
-            translate([hole_x, y, pocket_z - 0.6]) {
-                cylinder(h = 0.6 + board_thick + post_extra, d = post_d);   // shaft
-                if (post_snap)
-                    translate([0, 0, 0.6 + board_thick + tab_gap])          // snap head
-                        cylinder(h = post_extra,
-                                 d1 = post_d + 2*snap_lip, d2 = post_d - 0.3);
-            }
+        // PCB pocket (locates the board)
+        translate([pcb_x0 - pocket_clear, pcb_y0 - pocket_clear, pocket_z])
+            cube([pcb_len + 2*pocket_clear, pcb_width + 2*pocket_clear, board_thick + 10]);
 
-        // ---- connector-end hold-down lips ----
-        // each lip is one cube: the first ~1 mm sits on solid frame (fused),
-        // the rest overhangs the board top (which is flush at plate_t).
-        for (sy = [-1, 1])
-            translate([pcb_x0 - pocket_clear - 1.0,
-                       plate_h/2 + sy*(hole_spacing/2 + lip_w/2) - lip_w/2,
-                       board_top])
-                cube([1.0 + lip_reach, lip_w, lip_h]);
+        // airflow / component-relief window (clear of the screw pilots)
+        translate([pcb_x0 + win_end_inset, pcb_y0 + win_edge_inset, -1])
+            cube([pcb_len - 2*win_end_inset, pcb_width - 2*win_edge_inset, plate_t + 2]);
+
+        // connector / cable relief at the -X end
+        translate([-1, plate_h/2 - conn_notch_w/2, pocket_z])
+            cube([pcb_x0 + 1.1, conn_notch_w, board_thick + 10]);
+
+        // clip screw holes (through the ears)
+        for (x = clip_xs)
+            translate([x, clip_ear_y, -1]) cylinder(h = plate_t + 2, d = clip_hole_dia);
+
+        // mounting-screw holes (self-tap pilot, or insert bore)
+        for (y = hole_ys)
+            translate([hole_x, y, -1])
+                cylinder(h = plate_t + 2, d = use_insert ? insert_dia : screw_pilot_dia);
+        if (third_hole)
+            translate([third_x, plate_h/2, -1])
+                cylinder(h = plate_t + 2, d = use_insert ? insert_dia : screw_pilot_dia);
     }
+
+    // connector-end hold-down lips (flank the cable notch, hold that end flat)
+    for (sy = [-1, 1])
+        translate([pcb_x0 - pocket_clear - 1.0,
+                   plate_h/2 + sy*(conn_notch_w/2 + lip_w/2) - lip_w/2,
+                   board_top])
+            cube([1.0 + lip_reach, lip_w, lip_h]);
 }
 
 /* =========================================================================
@@ -158,9 +165,9 @@ if (show == "assembly") {
     pcb_mock();
 } else if (show == "exploded") {
     color("LightSteelBlue") top_mount();
-    translate([0, 0, 14]) pcb_mock();
+    translate([0, 0, 16]) pcb_mock();
 } else if (show == "mount") {
-    top_mount();          // export this one to STL
+    top_mount();          // export this to STL
 } else if (show == "pcb") {
     pcb_mock();
 }
