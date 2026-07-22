@@ -66,7 +66,8 @@ screw_pilot_dia= 1.6;    // pilot for an M2 self-tapping screw
 insert_dia     = 3.2;    // hole for an M2 brass heat-set insert
 win_end_inset  = 8.0;    // airflow window kept this far from each PCB end
 win_edge_inset = 2.0;    // airflow window kept this far from each long edge
-conn_notch_w   = 6.0;    // cable/connector relief width at the connector end
+conn_relief_w  = 7.0;    // width of the open relief at the connector end (for the
+                         // USB plug); the connector is on the FRONT, plate is behind
 lip_reach      = 1.0;    // connector-end hold-down lip overhang
 lip_w          = 3.0;    // width of each connector-end lip
 lip_h          = 1.0;    // thickness of each lip
@@ -117,9 +118,14 @@ module pcb_mock() {
                 translate([third_x - pcb_x0, pcb_width/2 + third_y_offset, -1])
                     cylinder(h = board_thick + 2, d = hole_dia);
         }
-    color("Black")     translate([cam_x, plate_h/2, board_top]) cylinder(h = lens_protrude, d = 5.68);
-    color("Khaki")     translate([led_x, plate_h/2, board_top]) cube([3.5,3.5,1.2], center=true);
-    color("Gainsboro") translate([pcb_x0-4, plate_h/2, pocket_z]) cube([4, 6, 2.6]); // connector
+    color("Black") translate([cam_x, plate_h/2, board_top]) cylinder(h = lens_protrude, d = 5.68);
+    color("Khaki") translate([led_x, plate_h/2 - 1.75, board_top]) cube([3.5, 3.5, 1.2]);
+    // connector: on the FRONT face at the connector end, socket opening faces -X
+    color("Gainsboro")
+        translate([pcb_x0, plate_h/2 - 3, board_top]) cube([5, 6, 2.6]);
+    // mating USB plug + cable exiting off the -X end (shows the space it needs)
+    color("DimGray")
+        translate([pcb_x0 - 7, plate_h/2 - 2, board_top + 0.4]) cube([8, 4, 1.8]);
 }
 
 // The backing mount
@@ -140,9 +146,10 @@ module top_mount() {
         translate([win_x0, pcb_y0 + win_edge_inset, -1])
             cube([win_x1 - win_x0, pcb_width - 2*win_edge_inset, plate_t + 2]);
 
-        // connector / cable relief at the -X end
-        translate([-1, plate_h/2 - conn_notch_w/2, pocket_z])
-            cube([pcb_x0 + 1.1, conn_notch_w, board_thick + 10]);
+        // connector / plug relief: fully open the -X end center so the USB plug
+        // can be inserted and the cable routed out
+        translate([-3, plate_h/2 - conn_relief_w/2, -1])
+            cube([pcb_x0 + 2 + 3, conn_relief_w, plate_t + 2]);
 
         // clip screw holes (through the ears)
         for (x = clip_xs)
@@ -160,7 +167,7 @@ module top_mount() {
     // connector-end hold-down lips (flank the cable notch, hold that end flat)
     for (sy = [-1, 1])
         translate([pcb_x0 - pocket_clear - 1.0,
-                   plate_h/2 + sy*(conn_notch_w/2 + lip_w/2) - lip_w/2,
+                   plate_h/2 + sy*(conn_relief_w/2 + lip_w/2) - lip_w/2,
                    board_top])
             cube([1.0 + lip_reach, lip_w, lip_h]);
 }
