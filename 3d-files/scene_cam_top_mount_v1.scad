@@ -52,8 +52,8 @@ clip_hole_pitch = 64.0;  // distance between the two clip screws
 clip_end_margin = 3.0;   // ears sit 3 mm in from each bar end
 bar_len         = clip_hole_pitch + 2*clip_end_margin;   // -> 70 mm
 clip_ear_dia    = 7.0;   // rounded ear around the clip hole
-clip_ear_drop   = 2.0;   // how far the ear's hole sits beyond the rod-side edge
-                         //   (tune this so the clips reach the rod: test-fit)
+clip_ear_drop   = 4.0;   // how far the ear's hole sits beyond the rod-side edge
+                         //   (larger = clips/rod sit further from the board)
 
 /* =========================================================================
    PLATE + RETENTION  (tunable)
@@ -133,9 +133,13 @@ module top_mount() {
     difference() {
         union() {
             cube([bar_len, plate_h, plate_t]);
-            // clip ears (L-tabs) on the rod-side edge at each end
+            // clip ears (L-tabs): a rounded tab reaching from the rod-side edge
+            // out to the clip hole (stays fused to the plate at any drop)
             for (x = clip_xs)
-                translate([x, clip_ear_y, 0]) cylinder(h = plate_t, d = clip_ear_dia);
+                hull() {
+                    translate([x, 0, 0])         cylinder(h = plate_t, d = clip_ear_dia);
+                    translate([x, clip_ear_y, 0]) cylinder(h = plate_t, d = clip_ear_dia);
+                }
         }
 
         // PCB pocket (locates the board)
