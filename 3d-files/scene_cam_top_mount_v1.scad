@@ -24,14 +24,18 @@ show = "assembly";   // "assembly" | "exploded" | "mount" | "pcb"
    >>> MEASURE THESE on your actual PCB with calipers. <<<
    The values below are ESTIMATES read off your photos - confirm before print.
    ========================================================================= */
-pcb_len       = 58.0;   // long dimension of the board
-pcb_width     = 8.5;    // short dimension of the board
-pcb_thick     = 1.2;    // board thickness
+pcb_len       = 62.0;   // long dimension of the board          (measured)
+pcb_width     = 9.0;    // short dimension of the board         (measured)
+module_height = 5.68;   // OVERALL thickness incl. lens/components (measured).
+                        // Informational only - the front stays open so the
+                        // lens/LED/chips are exposed; nothing recesses this far.
+board_thick   = 1.6;    // BARE board edge thickness -> sets pocket depth and
+                        // snap/lip heights. Confirm this one (typical FR4 = 1.6).
 
 // The two plated mounting holes are near ONE end, stacked across the width:
 hole_dia      = 2.1;    // diameter of each mounting hole
-hole_from_end = 2.5;    // hole-center distance from the nearest board end (lengthwise)
-hole_spacing  = 5.0;    // center-to-center across the width (must be < pcb_width)
+hole_from_end = 3.0;    // hole-center distance from the nearest board end (lengthwise)
+hole_spacing  = 5.5;    // center-to-center across the width (must be < pcb_width)
 
 /* =========================================================================
    FIXED interface to the existing white clips (extracted from the STEP files).
@@ -67,7 +71,7 @@ $fn = 48;
 plate_h  = pcb_width + 2*frame;          // overall bar height (~13.5 mm)
 pcb_x0   = (bar_len - pcb_len)/2;         // PCB left edge (centered)
 pcb_y0   = (plate_h - pcb_width)/2;       // PCB bottom edge (centered)
-pocket_z = plate_t - pcb_thick;           // pocket floor height
+pocket_z = plate_t - board_thick;           // pocket floor height
 board_top= plate_t;                       // PCB top is flush with plate top
 
 // mounting-hole centers (near the +X end of the board)
@@ -88,10 +92,10 @@ module pcb_mock() {
     color("DarkSlateGray")
     translate([pcb_x0, pcb_y0, pocket_z])
         difference() {
-            cube([pcb_len, pcb_width, pcb_thick]);
+            cube([pcb_len, pcb_width, board_thick]);
             for (y = hole_ys)
                 translate([hole_x - pcb_x0, y - pcb_y0, -1])
-                    cylinder(h = pcb_thick + 2, d = hole_dia);
+                    cylinder(h = board_thick + 2, d = hole_dia);
         }
     // lens bump on the FRONT face, to show which way the camera looks
     color("Black")
@@ -110,7 +114,7 @@ module top_mount() {
             translate([pcb_x0 - pocket_clear, pcb_y0 - pocket_clear, pocket_z])
                 cube([pcb_len + 2*pocket_clear,
                       pcb_width + 2*pocket_clear,
-                      pcb_thick + 10]);
+                      board_thick + 10]);
 
             // ---- airflow / component-relief window (kept clear of posts) ----
             translate([pcb_x0 + win_end_inset, pcb_y0 + win_edge_inset, -1])
@@ -128,9 +132,9 @@ module top_mount() {
         // start 0.6 mm below the pocket floor so they fuse to the plate.
         for (y = hole_ys)
             translate([hole_x, y, pocket_z - 0.6]) {
-                cylinder(h = 0.6 + pcb_thick + post_extra, d = post_d);   // shaft
+                cylinder(h = 0.6 + board_thick + post_extra, d = post_d);   // shaft
                 if (post_snap)
-                    translate([0, 0, 0.6 + pcb_thick + tab_gap])          // snap head
+                    translate([0, 0, 0.6 + board_thick + tab_gap])          // snap head
                         cylinder(h = post_extra,
                                  d1 = post_d + 2*snap_lip, d2 = post_d - 0.3);
             }
