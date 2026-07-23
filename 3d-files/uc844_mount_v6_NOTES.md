@@ -15,7 +15,19 @@ pose; splits into separate prints; clips go to the sides (off the lens axis).
   Ø3.2 clip holes at the ~18.7 mm clip pitch.
 - `show` = `assembly | exploded | frame | arm`.
 
+## Update — joint + printability pass
+- **Frame + arm both manifold** (CGAL Simple: yes). Aim unchanged: tip→pupil 30.0 mm,
+  38° vs 38.1° needed.
+- **Arm remodeled as a single FLAT PLATE** (was round struts) lying in the tilted
+  plane through the clip-ears + frame pads → lays flat on the bed, prints without
+  support. Hangs below the lens/FOV.
+- **Frame prints flat** pocket-up; the two bottom lugs are in-plane (print flat too).
+- **Bolt joint**: each frame lug and its arm pad share a coaxial hole along the frame
+  normal → M2.5 bolt + nut laps them (thin lugs, no insert needed). Verified coaxial.
+- `show="print"` lays both parts out (arm preview rotation still cosmetically off).
+
 ## Next steps (in order)
+0. Cosmetic: fix `show="print"` arm rotation to sit truly flat (part already is flat).
 1. **Re-render** side/front/iso after the bottom-attach rework; confirm no strut↔board
    collision and FOV still clear. Run CGAL manifold check on `frame` and `arm`.
 2. **Clip interface (critical):** the clip-ear is currently a placeholder tab. Extract

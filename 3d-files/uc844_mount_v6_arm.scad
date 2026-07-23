@@ -107,19 +107,22 @@ module frame_body() {
 // PART 1 - FRAME PIECE (frame + two back attach-ears)
 // Local: pocket faces +X, back face at x=0, bottom edge at z=0, extends +Z.
 // ============================================================================
-lug_h = 7;   // how far the frame bottom lugs drop below the frame bottom edge
+lug_h = 9;         // how far the frame bottom lugs drop below the frame bottom edge
+lug_w = 7;         // lug width (Y)
+lug_thk_back = 1.6; // lug bulk behind the frame back (total lug thickness ~3.2 mm)
+lug_hole_z = -5.5; // bolt-hole height (below the frame bottom edge)
 module frame_piece() {
     // frame standing: bottom edge -> z=0, pocket -> +X
     translate([0, 0, frame_outer/2]) rotate([0, 90, 0]) frame_body();
-    // two attach-lugs hanging off the BOTTOM border (z<0), at +/-ear_pitch/2.
-    // The arm bolts to these (screw along Y). Staying at the bottom keeps the arm
-    // below the lens/FOV and off the board face.
+    // two lugs hanging off the BOTTOM border (z<0). The arm laps each lug and an
+    // M2.5 bolt+nut through the frame-normal hole joins them. Thin/in-plane so the
+    // frame still prints flat; at the bottom so the arm stays below the lens/FOV.
     for (sy = [-1, 1])
-        translate([0, sy*ear_pitch/2 - arm_th/2, -lug_h])
+        translate([-lug_thk_back, sy*ear_pitch/2 - lug_w/2, -lug_h])
             difference() {
-                cube([frame_height + 2, arm_th, lug_h + 2]);
-                translate([(frame_height+2)/2, -0.5, lug_h/2])
-                    rotate([-90, 0, 0]) cylinder(h = arm_th + 1, d = ear_insert_dia);
+                cube([lug_thk_back + frame_height, lug_w, lug_h + 4]);  // overlaps border z0..3
+                translate([-1, lug_w/2, lug_h + lug_hole_z])
+                    rotate([0, 90, 0]) cylinder(h = lug_thk_back + frame_height + 2, d = ear_screw_dia);
             }
 }
 
@@ -132,27 +135,27 @@ function place_pt(p) = [ px + p[0]*cos(tilt_angle) - p[2]*sin(tilt_angle),
                          p[1],
                          pz + p[0]*sin(tilt_angle) + p[2]*cos(tilt_angle) ];
 
-// frame-lug hole centre (local) -> world
-function frame_pad(sy) = place_pt([(frame_height+2)/2, sy*ear_pitch/2, -lug_h/2]);
+// arm frame-pad centre (world): just behind the lug back face, at the bolt hole
+function arm_pad(sy) = place_pt([-lug_thk_back - arm_th/2, sy*ear_pitch/2, lug_hole_z]);
+plate_t = 3.5;   // arm plate thickness
+// The arm is a single FLAT PLATE lying in the tilted plane that contains both
+// clip-ears (at the rod) and both frame pads. Flat -> lays flat on the bed to print.
+// Top edge: two Ø3.2 clip holes at the clip pitch (existing white clips bolt on).
+// Bottom edge: two M2.5 bolt holes lapping the frame lugs.
 module arm() {
-    for (sy = [-1, 1]) {
-        ce = [0, sy*clip_pitch/2, 0];   // clip-ear at the rod
-        fp = frame_pad(sy);             // frame bottom-lug pad
-        // strut: frame lug -> clip-ear (stays below the lens/FOV, off the board)
-        hull() { translate(fp) sphere(d = arm_th); translate(ce) sphere(d = arm_th); }
-        // clip-ear at the rod: tab with a Ø3.2 clip hole (axis along Y)
-        translate(ce) difference() {
-            translate([-4, -arm_th/2, -4]) cube([8, arm_th, 8]);
-            rotate([-90,0,0]) cylinder(h = arm_th + 2, center = true, d = clip_hole_dia);
+    difference() {
+        hull() for (sy = [-1, 1]) {
+            translate([0, sy*clip_pitch/2, 0]) rotate([0,-tilt_angle,0]) cube([plate_t, 8, 9], center=true);
+            translate(arm_pad(sy))             rotate([0,-tilt_angle,0]) cube([plate_t, lug_w, 9], center=true);
         }
-        // frame-end pad: laps the frame lug, screw along Y
-        translate(fp) difference() {
-            translate([-arm_th/2, -arm_th/2 - 1.6, -arm_th/2]) cube([arm_th, arm_th, arm_th]);
-            rotate([-90,0,0]) cylinder(h = arm_th + 5, center = true, d = ear_screw_dia);
+        // clip holes (top) + frame bolt holes (bottom): both along the plate normal
+        for (sy = [-1, 1]) {
+            translate([0, sy*clip_pitch/2, 0]) rotate([0,-tilt_angle,0]) rotate([0,90,0])
+                cylinder(h = plate_t + 4, center = true, d = clip_hole_dia);
+            translate(arm_pad(sy)) rotate([0,-tilt_angle,0]) rotate([0,90,0])
+                cylinder(h = plate_t + lug_thk_back + 4, center = true, d = ear_screw_dia);
         }
     }
-    // bottom cross-brace ties the two halves into ONE printable arm (below the rod)
-    hull() { translate(frame_pad(-1)) sphere(d = arm_th); translate(frame_pad(1)) sphere(d = arm_th); }
 }
 
 // ============================================================================
@@ -197,4 +200,8 @@ if (show == "assembly") {
     frame_piece();
 } else if (show == "arm") {
     arm();
+} else if (show == "print") {
+    // each part laid ~flat on the bed (Z up), separated in Y
+    rotate([0, -90, 0]) frame_piece();
+    translate([0, 60, 0]) rotate([0, tilt_angle - 90, 0]) arm();
 }
