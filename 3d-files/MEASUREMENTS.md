@@ -40,6 +40,9 @@ camera** top mount.
   (focus allows down to ~1 cm); limited by FOV/framing and face clearance.
 - **Eyeball depth:** ~19 mm (0.75″) behind the glasses lens plane (the vertical plane
   through the top and bottom rims).
+- **Pupil height:** ~27 mm (2.7 cm) above the bottom rod.
+- **Rod spacing:** ~46 mm (4.6 cm) between the bottom and top rods (context / the
+  lens-plane height).
 - **Preferred tilt:** ~60° for the internal eye cam (from NOTES.md).
 - **Placement intent:** lens just **below** the eye (out of the sightline), angled
   **up** at the pupil, as close as practical.
