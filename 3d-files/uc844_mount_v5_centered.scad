@@ -50,32 +50,40 @@ frame_height = register_depth + lead_in_depth;
 rod_x = 5.0;    // fore-aft depth
 rod_z = 2.75;   // up-down thickness (2.5-3 mm, rounded)
 
-// ---------------- rod clamp (tight two-piece, compact for the thin rod) --
+// ---------------- rod clamp (tight two-piece, ASYMMETRIC) ---------------
+// Both screws sit on the EYE side (+X); the WORLD side (-X) is kept thin. That
+// keeps the clamp out of the camera's sight line, which rises on the world side
+// of the rod on its way from the (low, forward) lens to the (high, back) pupil.
 clamp_bore_x_clear = 0.30;
 clamp_bore_squeeze = 0.15;
-clamp_wall         = 2.0;
-clamp_width        = 14.0;   // grip along the rod (fits within ~1 inch usable)
+clamp_wall         = 2.0;    // material below the groove
+clamp_wall_x       = 1.6;    // thin world-side wall (out of the sight line)
 clamp_insert_hole_dia = 3.6;
-clamp_insert_boss_dia = 6.0;
-clamp_screw_offset    = 5.0; // screws just outside the 5 mm-deep rod
+clamp_boss_dia     = 5.5;
+clamp_screw_x      = 5.5;    // screws this far to the EYE side of the rod
+clamp_screw_y      = 5.0;    // and this far fore/aft along the rod (+/-)
 channel_r_x = rod_x/2 + clamp_bore_x_clear;
 channel_r_z = rod_z/2 - clamp_bore_squeeze;
 clamp_half_h = channel_r_z + clamp_wall;
 clamp_gap    = max(rod_z - 2*channel_r_z, 0);
-clamp_len_x  = 2*clamp_screw_offset + clamp_insert_boss_dia + 2;   // ~18
+clamp_x0 = -(channel_r_x + clamp_wall_x);            // world edge (thin)
+clamp_x1 = clamp_screw_x + clamp_boss_dia/2 + 1.0;   // eye edge
+clamp_width  = 2*(clamp_screw_y + clamp_boss_dia/2 + 1.0);  // grip along the rod
+clamp_len_x  = clamp_x1 - clamp_x0;
+clamp_screws = [[clamp_screw_x, clamp_screw_y], [clamp_screw_x, -clamp_screw_y]];
 
 // ---------------- eye / aim geometry (MEASURED; drives the nominal) ------
 // Origin = clamp center; +X toward the face/eye; +Z up; rod along Y.
 eye_depth = 19;   // pupil this far behind the glasses lens plane (0.75")
 eye_rise  = 27;   // pupil this far above the bottom rod (2.7 cm)
-lens_len  = 13;   // lens protrusion off the PCB front (mock / tip position)
+lens_len  = 15.86; // M12 lens overall length (datasheet); front Ø14, body Ø12
 rod_top_gap = 46; // bottom-rod -> top-rod spacing (context only)
 eye = [eye_depth, 0, clamp_half_h + eye_rise];
 
 // ---------------- centered tilt pivot (bottom-edge clevis) + rise arm ----
-tilt_angle = 45;     // NOMINAL up-tilt; pivot overrides on the face
+tilt_angle = 36;     // NOMINAL up-tilt; pivot overrides on the face
 pivot_x    = -3;     // pivot axis X (world side of the rod)
-pivot_z    = -31;    // pivot axis Z (below the rod; sets how low the frame hangs)
+pivot_z    = -20;    // pivot axis Z (below the rod; sets how low the frame hangs)
 tab_reach  = 6;      // frame bottom edge sits this far above the pivot axis
 
 pivot_pad_dia = 13.0;
@@ -155,18 +163,18 @@ module frame_body() {
 module clamp_half(is_cap) {
     difference() {
         union() {
-            translate([-clamp_len_x/2, -clamp_width/2, 0])
-                cube([clamp_len_x, clamp_width, clamp_half_h]);
-            if (!is_cap)
-                for (x = [-clamp_screw_offset, clamp_screw_offset])
-                    translate([x, 0, 0]) cylinder(h = clamp_half_h + 3, d = clamp_insert_boss_dia);
+            translate([clamp_x0, -clamp_width/2, 0])
+                cube([clamp_x1 - clamp_x0, clamp_width, clamp_half_h]);
+            if (!is_cap)   // base: bosses drop below for insert depth
+                for (p = clamp_screws)
+                    translate([p[0], p[1], -3]) cylinder(h = clamp_half_h + 3, d = clamp_boss_dia);
         }
         translate([0, 0, is_cap ? 0 : clamp_half_h])
             rotate([90, 0, 0])
                 linear_extrude(height = clamp_width + 2, center = true)
                     oval_x_z(channel_r_x, channel_r_z);
-        for (x = [-clamp_screw_offset, clamp_screw_offset])
-            translate([x, 0, -0.5]) cylinder(h = clamp_half_h + 4, d = clamp_insert_hole_dia);
+        for (p = clamp_screws)
+            translate([p[0], p[1], -3.5]) cylinder(h = clamp_half_h + 5, d = clamp_insert_hole_dia);
     }
 }
 module rod_mock() {
@@ -209,8 +217,8 @@ module mount_body() {
             }
         // rise strut: clamp underside -> prong (triangulated for stiffness)
         hull() {
-            translate([-clamp_len_x/2 + 1, ry - prong_th/2, 0])
-                cube([clamp_len_x - 2, prong_th, 0.1]);
+            translate([clamp_x0 + 1, ry - prong_th/2, 0])
+                cube([clamp_x1 - clamp_x0 - 2, prong_th, 0.1]);
             translate([pivot_x, ry - prong_th/2, pivot_z])
                 rotate([-90, 0, 0]) cylinder(h = prong_th, d = pivot_pad_dia);
         }
@@ -221,9 +229,10 @@ module mount_body() {
 // MOCKS  (eye + lens, for aim checking only - not printed)
 // ============================================================================
 module lens_mock() {
-    color("Black")
-        translate([frame_height, 0, tab_reach + frame_outer/2])
-            rotate([0, 90, 0]) cylinder(h = lens_len, d = 12);
+    translate([frame_height, 0, tab_reach + frame_outer/2]) rotate([0, 90, 0]) {
+        color("DimGray") cylinder(h = lens_len, d = 12);              // Ø12 body
+        color("Black")   translate([0, 0, lens_len - 3]) cylinder(h = 3, d = 14); // Ø14 front
+    }
 }
 module eye_mock() {
     color("Azure",   0.35) translate(eye + [10, 0, 0]) sphere(d = 24);   // eyeball
