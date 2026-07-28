@@ -197,7 +197,7 @@ if (show == "assembly") {
     rod_mock();
     for (sy = [-1, 1]) clip_mock(sy);
     eye_mock();
-    fov_cone();
+    // fov_cone();
 } else if (show == "exploded") {
     place_frame() frame_piece();
     translate([0,0,-25]) arm();

@@ -52,7 +52,7 @@ lens_base_x = 0;
 
 // ---------------- clip / ear interface (from bottom mount/*.step) --------
 // clip_pitch    = 18.7;   // Ø3.2 clip-screw spacing along the rod
-clip_pitch = 39;
+clip_pitch = 22.5; // 39
 clip_hole_dia = 3.2;
 ear_screw_dia = 2.9;    // M2.5 clearance for the frame<->arm screws
 ear_insert_dia = 3.6;   // M2.5 heat-set insert
@@ -122,19 +122,23 @@ module frame_piece() {
 
 // ============================================================================
 // PART 2 - TWO SEPARATE ARMS (one per side). Each: a clip-ear at the rod (mating
-// the real white clip's Ø3.2 hole) -> short body -> _____ TODO: Find way to attach to frame.
+// the real white clip's Ø3.2 hole) -> short body -> ___
 // ============================================================================
 function clip_ear_pt(sy) = [clip_dx - 3.2, sy*clip_pitch/2, clip_dz];      // clip screw hole (vertical)
 
 module one_arm(sy) {
-    ce = clip_ear_pt(sy) + [0, 0, 0];   // ear pad center at clip screw hole
+    ce = clip_ear_pt(sy);   // ear pad center at clip screw hole
     
     // Calculate local Z height on frame corresponding to clip Z height
     local_z = (ce[2] - pz) / cos(tilt_angle);
 
     // Project straight horizontally from ce (-X towards frame)
     frame_x = px - local_z * sin(tilt_angle) - 5;
-    frame_target = [frame_x, ce[1], ce[2]];
+    
+    frame_y = sy * frame_outer / 2;
+    
+    // frame_target = [frame_x, ce[1], ce[2]];
+    frame_target = [frame_x, frame_y, ce[2]];
     
     // Total thickness and width of the arm extension
     arm_height = arm_th; // Matches your 5mm depth
@@ -161,43 +165,19 @@ module one_arm(sy) {
             translate([-100, -100, -100])
                 cube([100, 200, 200]); 
         }
+        
+        // Trim outer Y overhang flush with frame walls
+        if (sy > 0) {
+            translate([-100, frame_outer/2, -100])
+                cube([200, 100, 200]);
+        } else {
+            translate([-100, -100 - frame_outer/2, -100])
+                cube([200, 100, 200]);
+        }
+        
     }
 }
-/**
-module one_arm(sy) {
-    ce = clip_ear_pt(sy) + [0, 0, 0];   // ear pad just below the clip's tab
-    
-    // Calculate the local frame Z height corresponding to the clip's Z height
-    // (Translates clip Z into frame local Z taking tilt into account)
-    local_z = (ce[2] - pz) / cos(tilt_angle);
 
-    // Project straight horizontally from ce (+X) to meet the tilted frame plane
-    frame_x = px - local_z * sin(tilt_angle) - 5;
-    frame_target = [frame_x, ce[1], ce[2]];
-    
-    difference() {
-        union() {
-        
-            translate(ce) cube([arm_th + 2, arm_th + 2, arm_t + 2], center = true);
-
-            hull() {
-                translate(ce) 
-                    cube([arm_th, arm_th + 2, arm_th], center = true);
-                
-                translate(frame_target) 
-                    cube([arm_th, arm_th + 2, arm_th], center = true);
-            }
-        }
-        // Vertical clip screw clearance hole
-        translate(ce) cylinder(h = arm_th + 8, center = true, d = clip_hole_dia);
-        
-        place_frame() {
-            translate([-100, -100, -100])
-                cube([100, 200, 200]); 
-        }
-    }
-}
-*/
 module arm() { for (sy = [-1, 1]) one_arm(sy); }   // assembly shows both
 
 module frame_and_arms() {
