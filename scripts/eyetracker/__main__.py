@@ -17,7 +17,7 @@ from scripts.eyetracker.app import App
 from scripts.eyetracker.calibration.collector import SampleCollector
 from scripts.eyetracker.calibration.routine import CalibrationRoutine
 from scripts.eyetracker.calibration.targets import GridPattern
-from scripts.eyetracker.cameras.discovery import detect_cameras, pick_scene_index
+from scripts.eyetracker.cameras.discovery import detect_cameras, eye_first, pick_scene_index
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import (
     GAZE_BETA,
@@ -44,6 +44,7 @@ from scripts.eyetracker.config import (
     CALIB_STD_THRESH,
     CALIB_WARMUP,
     CONF_THRESH,
+    EYE_UVC_ID,
     EYE_CAM_FOCAL_LENGTH_PX,
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
@@ -198,7 +199,7 @@ def _run_video(path: str) -> None:
 
 def main() -> None:
 
-    cameras = detect_cameras()
+    cameras = eye_first(detect_cameras(), EYE_UVC_ID)
     result = SelectionGui().pick(cameras)
     if result is None:
         return

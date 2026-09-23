@@ -28,6 +28,8 @@ HIGH_FPS_MODE = False
 # internally on the sensor/bridge and can't be disabled over UVC, and the
 # IR-lit pupil doesn't need exposure control. Poke its gain from the terminal if
 # ever needed — see docs/uvc_exposure_cheatsheet.md (id 0x0c45:0x6366).
+# On Linux the startup picker defaults to the camera with this USB id.
+EYE_UVC_ID = "0x0c45:0x6366"
 
 
 # ---- Scene camera ------------------------------------------------------------

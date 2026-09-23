@@ -23,6 +23,16 @@ def detect_cameras(max_cams: int = 10) -> list[int]:
     return available
 
 
+def eye_first(cameras: List[int], eye_usb_id: Optional[str]) -> List[int]:
+    """Reorder so the eye cam (matched by USB id, Linux only) comes first —
+    the picker defaults to the first entry."""
+    if IS_LINUX and eye_usb_id:
+        idx = index_for_usb_id(eye_usb_id)
+        if idx in cameras:
+            return [idx] + [c for c in cameras if c != idx]
+    return cameras
+
+
 def pick_scene_index(eye_index: int, cameras: List[int],
                      scene_usb_id: Optional[str]) -> int:
     """Choose the scene camera given the user-picked eye camera. On Linux,
