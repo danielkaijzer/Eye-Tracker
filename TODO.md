@@ -20,10 +20,14 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 
 ## Capture architecture
 
-- [ ] One capture thread per camera, each stamping frames on arrival. Today
-      `App.run()` reads eye then scene serially, so the eye cam (natively
-      ~100 fps) is paced by the 30 fps scene cam and its frames queue in the
-      driver, which adds latency.
+- [x] One grabber thread per camera keeping only the newest frame (eye frame
+      age 275 ms -> 13 ms on the Jetson). ArUco only runs during calibration.
+- [ ] Stamp each frame on arrival in the grabber thread (feeds timestamping below)
+- [ ] App loop still blocks on the 30 fps scene read, so the eye is processed
+      at ~30 Hz, not ~100. Decouple so every eye frame is processed.
+- [ ] ArUco on full 1080p is ~45 ms/frame, so the loop drops to ~14 Hz during
+      calibration. Try detecting on a downscaled frame and rescaling corners.
+- [ ] Jetson power mode: currently 15W; try `sudo nvpmodel -m 2` (MAXN_SUPER)
 - [ ] Main loop consumes the latest eye frame; scene frames matched by timestamp
 - [ ] Eye cam at 120 fps (640x480 MJPG). Measured 121 fps alongside 1080p scene
       on the shared USB 2 hub, so bandwidth is fine. Update `HIGH_FPS_MODE` /

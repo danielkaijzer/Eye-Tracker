@@ -7,8 +7,16 @@ alongside the live capture stream. See UvcExposureController and the
 project_macos_uvc_exposure memory. On Linux, capture uses the V4L2 backend with
 MJPG (uncompressed YUYV can't carry 1080p at usable fps over USB 2), and
 exposure goes through v4l2-ctl (cameras/v4l2.py).
+
+Frames are pulled by a background thread that keeps only the newest one.
+Without it, a camera faster than the App loop (eye cam ~100 fps vs a ~30 Hz
+loop) fills the V4L2 buffer queue and read() hands back the OLDEST queued
+frame — measured ~130-275 ms stale on the Jetson. AVFoundation drops stale
+frames itself, which is why this never showed on macOS.
 """
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -48,6 +56,14 @@ class OpenCVCamera(CameraSource):
         self.index = index
         self.settings = settings or CameraSettings()
         self._cap: Optional[cv2.VideoCapture] = None
+        # Latest-frame handoff from the grabber thread. _seq bumps per grab
+        # (successful or not) so read() never returns the same frame twice.
+        self._cond = threading.Condition()
+        self._frame: Optional[np.ndarray] = None
+        self._seq = 0
+        self._read_seq = 0
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
         # Exposure controller (uvc-util / v4l2-ctl), set in open() when a
         # uvc_id is given and the binary + device are available.
         self._uvc = None
@@ -74,19 +90,44 @@ class OpenCVCamera(CameraSource):
             self._init_uvc_exposure(s)
         self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._running = True
+        self._thread = threading.Thread(target=self._grab_loop, daemon=True,
+                                        name=f"cam{self.index}-grab")
+        self._thread.start()
         return True
 
-    def read(self) -> Optional[np.ndarray]:
+    def _grab_loop(self) -> None:
+        while self._running:
+            ret, frame = self._cap.read()
+            with self._cond:
+                self._frame = frame if ret else None
+                self._seq += 1
+                self._cond.notify_all()
+            if not ret:
+                time.sleep(0.01)  # unplugged/dead cam: don't spin a core
+
+    def read(self, timeout_s: float = 1.0) -> Optional[np.ndarray]:
+        """Newest frame not yet returned; blocks until one arrives. None on
+        a failed grab or if nothing arrives within timeout_s."""
         if self._cap is None:
             return None
-        ret, frame = self._cap.read()
-        if not ret:
+        with self._cond:
+            if not self._cond.wait_for(lambda: self._seq != self._read_seq,
+                                       timeout=timeout_s):
+                return None
+            self._read_seq = self._seq
+            frame = self._frame
+        if frame is None:
             return None
         if self.settings.flip_vertical:
             frame = cv2.flip(frame, 0)
         return frame
 
     def release(self) -> None:
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
         if self._cap is not None:
             self._cap.release()
             self._cap = None
