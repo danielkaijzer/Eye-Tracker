@@ -159,8 +159,13 @@ class App:
                 if ext_frame is not None:
                     self.last_scene_frame = ext_frame.copy()
                     # One ArUco detection per frame, cached — the routine's
-                    # tick() reuses it via cached_homography().
-                    self.target_mapper.process_frame(self.last_scene_frame)
+                    # tick() reuses it via cached_homography(). Only needed
+                    # while calibrating (routine, overlay HUD, preview are the
+                    # sole consumers); on full-res 1080p it's the single most
+                    # expensive step (~45 ms/frame on the Jetson), so outside
+                    # calibration just clear the cache.
+                    self.target_mapper.process_frame(
+                        self.last_scene_frame if self.routine.is_active else None)
 
                     gaze_xy = None
                     if self.mapper.is_fitted() and not self.routine.is_active:

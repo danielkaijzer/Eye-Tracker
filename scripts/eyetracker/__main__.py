@@ -17,7 +17,7 @@ from scripts.eyetracker.app import App
 from scripts.eyetracker.calibration.collector import SampleCollector
 from scripts.eyetracker.calibration.routine import CalibrationRoutine
 from scripts.eyetracker.calibration.targets import GridPattern
-from scripts.eyetracker.cameras.discovery import detect_cameras
+from scripts.eyetracker.cameras.discovery import detect_cameras, eye_first, pick_scene_index
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import (
     GAZE_BETA,
@@ -44,6 +44,8 @@ from scripts.eyetracker.config import (
     CALIB_STD_THRESH,
     CALIB_WARMUP,
     CONF_THRESH,
+    EYE_UVC_ID,
+    EYE_CAM_FLIP_VERTICAL,
     EYE_CAM_FOCAL_LENGTH_PX,
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
@@ -66,8 +68,8 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 def _eye_cam_settings() -> CameraSettings:
     if HIGH_FPS_MODE:
         return CameraSettings(request_width=320, request_height=240,
-                              request_fps=120, flip_vertical=True)
-    return CameraSettings(flip_vertical=True)
+                              request_fps=120, flip_vertical=EYE_CAM_FLIP_VERTICAL)
+    return CameraSettings(flip_vertical=EYE_CAM_FLIP_VERTICAL)
 
 
 def _scene_cam_settings() -> CameraSettings:
@@ -77,9 +79,10 @@ def _scene_cam_settings() -> CameraSettings:
                           exposure=SCENE_EXPOSURE)
 
 
-def _build_app(eye_index: int) -> App:
+def _build_app(eye_index: int, cameras: list[int]) -> App:
     eye_cam = OpenCVCamera(eye_index, _eye_cam_settings())
-    scene_index = 1 if eye_index == 0 else 0
+    scene_index = pick_scene_index(eye_index, cameras, SCENE_UVC_ID)
+    print(f"Eye cam index {eye_index}, scene cam index {scene_index}")
     scene_cam = OpenCVCamera(scene_index, _scene_cam_settings())
 
     target_mapper = ArucoHomography()
@@ -197,13 +200,13 @@ def _run_video(path: str) -> None:
 
 def main() -> None:
 
-    cameras = detect_cameras()
+    cameras = eye_first(detect_cameras(), EYE_UVC_ID)
     result = SelectionGui().pick(cameras)
     if result is None:
         return
     kind, val = result
     if kind == "camera":
-        _build_app(int(val)).run()
+        _build_app(int(val), cameras).run()
     elif kind == "video":
         _run_video(str(val))
 

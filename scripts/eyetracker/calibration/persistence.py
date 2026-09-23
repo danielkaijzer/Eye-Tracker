@@ -37,6 +37,8 @@ from scripts.eyetracker.config import (
     ARUCO_QUIET_ZONE_PX,
     EYE_CAM_FOV_DEG,
     EYE_CAM_RESOLUTION,
+    SCREEN_MODEL,
+    SCREEN_PHYSICAL_MM,
 )
 from scripts.eyetracker.gaze.base import FitReport, GazeMapper
 
@@ -172,7 +174,9 @@ def write_session_metadata(session_dir: str,
         "headset_model_version": None,
         "kappa_deg": None,
         "software": {"pupil_detector": None, "pye3d": None, "app_git_sha": None},
-        "screen": {"width": pw, "height": ph},
+        "screen": {"width": pw, "height": ph, "model": SCREEN_MODEL,
+                   "width_mm": SCREEN_PHYSICAL_MM[0],
+                   "height_mm": SCREEN_PHYSICAL_MM[1]},
         "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None},
         "eye_cam": {"width": eye_w, "height": eye_h, "fps": None,
                     "fov_deg": EYE_CAM_FOV_DEG, "identifier": None},

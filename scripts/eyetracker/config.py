@@ -24,10 +24,20 @@ EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
 
 HIGH_FPS_MODE = False
 
+# Software vertical flip of the eye image (the camera has no hardware flip
+# control). Depends on how the camera sits in the headset mount: the Mac-era
+# rig needed True; the current Jetson rig shows the eye upright with False.
+# Orientation doesn't affect gaze accuracy (the polynomial is fit in whatever
+# frame the pupil is detected in), but calibrations saved with one setting
+# don't transfer to the other.
+EYE_CAM_FLIP_VERTICAL = False
+
 # The eye camera's exposure isn't driven from the app: its auto-exposure runs
 # internally on the sensor/bridge and can't be disabled over UVC, and the
 # IR-lit pupil doesn't need exposure control. Poke its gain from the terminal if
 # ever needed — see docs/uvc_exposure_cheatsheet.md (id 0x0c45:0x6366).
+# On Linux the startup picker defaults to the camera with this USB id.
+EYE_UVC_ID = "0x0c45:0x6366"
 
 
 # ---- Scene camera ------------------------------------------------------------
@@ -51,6 +61,18 @@ SCENE_EXPOSURE = None
 # a fraction of the exposure-time range (1-10000): fine ≈ 10 units, coarse ≈ 500.
 EXPOSURE_STEP_FINE = 0.001
 EXPOSURE_STEP_COARSE = 0.05
+
+
+# ---- Calibration monitor -----------------------------------------------------
+# Physical specs of the monitor the calibration overlay is drawn on. The pixel
+# size is NOT configured here — the Tk overlay reads it at runtime — these only
+# annotate session metadata.json (e.g. to convert screen px to mm / visual
+# angle offline). Current rig: Jetson + Philips 221V8LB (21.5" 1920x1080 VA),
+# active area 476.64 x 268.11 mm per the Philips datasheet (0.24825 mm pitch).
+# The panel's EDID misreports its size (xrandr says 1394x784 mm), so don't
+# trust auto-detected mm. Update these if you calibrate on a different screen.
+SCREEN_MODEL = "Philips 221V8LB"
+SCREEN_PHYSICAL_MM = (476.64, 268.11)
 
 
 # ---- Display window ----------------------------------------------------------
