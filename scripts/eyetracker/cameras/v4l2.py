@@ -74,6 +74,11 @@ _LEVER_NAMES = ("exposure_time_absolute", "exposure_absolute")
 _AUTO_NAMES = ("auto_exposure", "exposure_auto")
 # auto_exposure menu value for Manual Mode (UVC: 1=manual, 3=aperture priority).
 _MANUAL_MODE = 1
+# UVC "auto exposure priority": when on, the camera may stretch the frame
+# period to fit a long exposure (e.g. 30 -> ~25 fps at exposure 332 = 33.2 ms).
+# Off pins the frame rate — which cross-camera sync relies on — and caps the
+# effective exposure at one frame period instead.
+_DYNAMIC_FPS = "exposure_dynamic_framerate"
 
 _CTRL_RE = re.compile(r"^\s*(\w+)\s+0x[0-9a-f]+\s+\((\w+)\)\s*:\s*(.*)$")
 
@@ -125,7 +130,8 @@ class V4l2ExposureController:
         return self._get_int(control)
 
     def probe(self) -> bool:
-        """Find the exposure lever, force manual mode, read range + value."""
+        """Find the exposure lever, force manual mode + a fixed frame rate,
+        read range + value."""
         ctrls = self._controls()
         lever = next((n for n in _LEVER_NAMES if n in ctrls), None)
         if lever is None:
@@ -133,6 +139,8 @@ class V4l2ExposureController:
         auto = next((n for n in _AUTO_NAMES if n in ctrls), None)
         if auto is not None:
             self._set_verified(auto, _MANUAL_MODE)
+        if _DYNAMIC_FPS in ctrls:
+            self._set_verified(_DYNAMIC_FPS, 0)
         info = ctrls[lever]
         self._lever = lever
         self._value_min = int(info.get("min", 0))
