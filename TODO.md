@@ -14,7 +14,7 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 - [x] Pick scene cam / default eye cam by USB id (two `/dev/video` nodes per camera)
 - [x] Monitor model + physical mm in session `metadata.json`
 - [x] Monitor at 100 Hz, persisted in `~/.config/monitors.xml`
-- [ ] Headset-on quick calibration on the Jetson: pupil quality, all 4 markers, LOO error
+- [x] Headset-on quick calibration on the Jetson
 - [ ] Check the scene exposure hotkeys and `metadata.json` from a real session
 - [ ] Open PR
 
