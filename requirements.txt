@@ -6,18 +6,24 @@ opencv-contrib-python==4.13.0.92
 pandas==2.2.3
 pyarrow==18.1.0
 
-# Pupil Labs 2D pupil detector — built from local clone.
-# System prereqs: `brew install eigen opencv` (already installed).
+# Pupil Labs 2D pupil detector — built from a local clone at ../pupil-detectors
+# (path is relative to the repo root, so run pip from there).
+# System prereqs: macOS `brew install eigen opencv`;
+# Linux `sudo apt install libeigen3-dev libopencv-dev cmake python3-dev`.
 # Build deps (scikit-build, cython) come from the package's pyproject.toml
 # via PEP 517 build isolation; no need to list them here.
 # Not editable: scikit-build skips the CMake C++ build on `-e` installs, so
 # the compiled .so never lands in site-packages. Plain install compiles it.
-/Users/danielkaijzer/src/pupil-detectors
+../pupil-detectors
+
+# pye3d — 3D eye model. No aarch64 wheel on PyPI; builds from source (needs Eigen).
+pye3d
 
 # uvc-util — macOS UVC exposure control (NOT a pip package; a CLI binary).
 # OpenCV/AVFoundation can't set camera exposure on macOS, so the app shells out
 # to uvc-util to drive gain / auto-exposure-mode (scripts/eyetracker/cameras/
 # uvc_util.py). Without it the app still runs, just with no exposure control.
+# Linux doesn't need it: exposure goes through v4l2-ctl (`apt install v4l-utils`).
 # System prereqs: Xcode Command Line Tools (`xcode-select --install`).
 # Build from source and put the binary on PATH (or set UVC_UTIL_PATH to it):
 #   git clone https://github.com/jtfrey/uvc-util.git

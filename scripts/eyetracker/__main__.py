@@ -17,7 +17,7 @@ from scripts.eyetracker.app import App
 from scripts.eyetracker.calibration.collector import SampleCollector
 from scripts.eyetracker.calibration.routine import CalibrationRoutine
 from scripts.eyetracker.calibration.targets import GridPattern
-from scripts.eyetracker.cameras.discovery import detect_cameras
+from scripts.eyetracker.cameras.discovery import detect_cameras, pick_scene_index
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import (
     GAZE_BETA,
@@ -77,9 +77,10 @@ def _scene_cam_settings() -> CameraSettings:
                           exposure=SCENE_EXPOSURE)
 
 
-def _build_app(eye_index: int) -> App:
+def _build_app(eye_index: int, cameras: list[int]) -> App:
     eye_cam = OpenCVCamera(eye_index, _eye_cam_settings())
-    scene_index = 1 if eye_index == 0 else 0
+    scene_index = pick_scene_index(eye_index, cameras, SCENE_UVC_ID)
+    print(f"Eye cam index {eye_index}, scene cam index {scene_index}")
     scene_cam = OpenCVCamera(scene_index, _scene_cam_settings())
 
     target_mapper = ArucoHomography()
@@ -203,7 +204,7 @@ def main() -> None:
         return
     kind, val = result
     if kind == "camera":
-        _build_app(int(val)).run()
+        _build_app(int(val), cameras).run()
     elif kind == "video":
         _run_video(str(val))
 

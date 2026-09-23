@@ -53,6 +53,18 @@ EXPOSURE_STEP_FINE = 0.001
 EXPOSURE_STEP_COARSE = 0.05
 
 
+# ---- Calibration monitor -----------------------------------------------------
+# Physical specs of the monitor the calibration overlay is drawn on. The pixel
+# size is NOT configured here — the Tk overlay reads it at runtime — these only
+# annotate session metadata.json (e.g. to convert screen px to mm / visual
+# angle offline). Current rig: Jetson + Philips 221V8LB (21.5" 1920x1080 VA),
+# active area 476.64 x 268.11 mm per the Philips datasheet (0.24825 mm pitch).
+# The panel's EDID misreports its size (xrandr says 1394x784 mm), so don't
+# trust auto-detected mm. Update these if you calibrate on a different screen.
+SCREEN_MODEL = "Philips 221V8LB"
+SCREEN_PHYSICAL_MM = (476.64, 268.11)
+
+
 # ---- Display window ----------------------------------------------------------
 DISPLAY_WIDTH = 640
 DISPLAY_HEIGHT = 480
