@@ -12,14 +12,30 @@ git clone https://github.com/pupil-labs/pupil-detectors.git ../pupil-detectors
 pip install -r requirements.txt                 # installs the local pupil-detectors clone
 ```
 
-`requirements.txt` references `../pupil-detectors` as a local path; adjust the clone location or edit the path if your layout differs. `pye3d` ships from PyPI.
+**Linux** (tested on Jetson Orin, JetPack 6 / Ubuntu 22.04, Python 3.10):
+
+```
+sudo apt install libeigen3-dev libopencv-dev cmake python3-dev python3-venv v4l-utils
+git clone https://github.com/pupil-labs/pupil-detectors.git ../pupil-detectors
+conda create -n et python=3.10 && conda activate et   # or a plain venv
+pip install -r requirements.txt                 # builds pupil-detectors + pye3d from source
+pip uninstall -y opencv-python                  # pupil-detectors pulls it in; it shadows opencv-contrib-python
+pip install --force-reinstall --no-deps opencv-contrib-python==4.13.0.92
+```
+
+If the pupil-detectors build fails with `FindCython ... cython;--version failed`, CMake cached a temp build-env path from an earlier failed attempt. Delete `../pupil-detectors/_skbuild` and retry. If it still fails, install the build deps (`pip install setuptools_scm scikit-build cmake ninja cython`) and use `pip install --no-build-isolation ../pupil-detectors`.
+
+Your user must be in the `video` group to open `/dev/video*`. Cameras are opened through V4L2 with MJPG. The scene cam is picked by its USB id (`SCENE_UVC_ID` in `config.py`) because each UVC camera shows up as two `/dev/video` nodes. Exposure hotkeys go through `v4l2-ctl`, not uvc-util. When launching over SSH, target the attached monitor with `DISPLAY=:0`.
+
+`requirements.txt` references `../pupil-detectors` as a local path relative to the repo root; adjust the clone location or edit the path if your layout differs. `pye3d` ships from PyPI (built from source on aarch64).
 
 **Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the laptop screen.
 
 ## Running
 
 ```
-py -m scripts.eyetracker
+py -m scripts.eyetracker                        # macOS
+DISPLAY=:0 python -m scripts.eyetracker         # Linux, in the `et` env (DISPLAY only needed over SSH)
 ```
 
 ### In-app controls (eye tracker window)
