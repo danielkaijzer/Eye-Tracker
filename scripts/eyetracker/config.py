@@ -24,6 +24,14 @@ EYE_CAM_FOCAL_LENGTH_PX = _compute_eye_focal_length_px()
 
 HIGH_FPS_MODE = False
 
+# Software vertical flip of the eye image (the camera has no hardware flip
+# control). Depends on how the camera sits in the headset mount: the Mac-era
+# rig needed True; the current Jetson rig shows the eye upright with False.
+# Orientation doesn't affect gaze accuracy (the polynomial is fit in whatever
+# frame the pupil is detected in), but calibrations saved with one setting
+# don't transfer to the other.
+EYE_CAM_FLIP_VERTICAL = False
+
 # The eye camera's exposure isn't driven from the app: its auto-exposure runs
 # internally on the sensor/bridge and can't be disabled over UVC, and the
 # IR-lit pupil doesn't need exposure control. Poke its gain from the terminal if

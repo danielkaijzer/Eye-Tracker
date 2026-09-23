@@ -45,6 +45,7 @@ from scripts.eyetracker.config import (
     CALIB_WARMUP,
     CONF_THRESH,
     EYE_UVC_ID,
+    EYE_CAM_FLIP_VERTICAL,
     EYE_CAM_FOCAL_LENGTH_PX,
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
@@ -67,8 +68,8 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 def _eye_cam_settings() -> CameraSettings:
     if HIGH_FPS_MODE:
         return CameraSettings(request_width=320, request_height=240,
-                              request_fps=120, flip_vertical=True)
-    return CameraSettings(flip_vertical=True)
+                              request_fps=120, flip_vertical=EYE_CAM_FLIP_VERTICAL)
+    return CameraSettings(flip_vertical=EYE_CAM_FLIP_VERTICAL)
 
 
 def _scene_cam_settings() -> CameraSettings:
