@@ -50,6 +50,7 @@ extrinsics jig and richer per-frame capture).
   "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null },
   "aruco":    { "dict_name": "...", "dict_id": n, "marker_px": n, "quiet_zone_px": n,
                 "ids": [...], "screen_centers": [[x, y], ...] },
+  "superseded_fixation_ids": [],
   "rig_calibration_id": null,
   "intrinsics": { "eye": null, "scene": { "K": [[...]], "dist": [...], "reproj_rms": n } },
   "extrinsics": null,
@@ -60,7 +61,14 @@ extrinsics jig and richer per-frame capture).
 Columns (see `LABELS_CSV_HEADER` in `calibration/persistence.py`):
 `image_path, fixation_id, x_screen, y_screen, pupil_x, pupil_y, confidence,
 timestamp, scene_target_x, scene_target_y`. Appended row-by-row during capture so a
-mid-session crash keeps what was already written. Richer per-frame fields
+mid-session crash keeps what was already written. `fixation_id` is unique within a
+session (one per capture attempt, so rejected/aborted attempts leave gaps) and
+names the images (`fix<id>_sample<n>.png`). A screen point can appear under
+several ids: once per pose in multi-pose, and twice when the detailed routine
+recaptures it. `metadata.json`'s `superseded_fixation_ids` lists the pass-1
+ids a recapture replaced; drop them to reproduce the live fit. Sessions from
+before 2026-09-23 reused ids across poses/recapture passes (and overwrote those
+images), so their `fixation_id` is unreliable there. Richer per-frame fields
 (ellipse params, pye3d 3D vectors, normalized-image paths) from
 `docs/data_collection.md` are added as the pipeline starts producing them.
 

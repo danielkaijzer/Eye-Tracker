@@ -101,10 +101,21 @@ class CalibrationRoutine:
         self.skipped_indices: List[int] = []
         self.captured_pupil: List[np.ndarray] = []
         self.captured_scene: List[np.ndarray] = []
-        # Target index (into self.targets) for each captured fixation.
-        # Used by the two-pass recapture path to remap "worst sample i"
-        # back to "redo target k".
-        self.captured_target_indices: List[int] = []
+        # Per captured fixation, index-matched to captured_pupil/scene: its
+        # on-screen target and its session-unique fixation id. Kept in lockstep
+        # (filtered together in pass 2) so the snapshot stays aligned across
+        # skips, poses and recapture.
+        self.captured_screen: List[Tuple[int, int]] = []
+        self.captured_fixation_ids: List[int] = []
+        # Session-unique fixation id: labels.csv `fixation_id` + image names.
+        # current_idx restarts at 0 per pose and in pass 2, so it can't be
+        # used — it made recaptures / later poses overwrite earlier images.
+        self._fixation_id: int = -1
+        self._next_fixation_id: int = 0
+        # Pass-1 fixation ids replaced by pass-2 recaptures. Their rows stay
+        # in labels.csv; metadata.json lists them so offline refits can drop
+        # them like the live fit does.
+        self._superseded_fixation_ids: List[int] = []
         # True iff we're currently re-prompting pass-2 (recapture) targets.
         self._in_pass_two: bool = False
         # Multi-pose state. current_pose is 1-based; _awaiting_pose is the
@@ -112,10 +123,6 @@ class CalibrationRoutine:
         # between poses.
         self.current_pose: int = 1
         self._awaiting_pose: bool = False
-        # Original (pass-1) targets list, preserved so the saved snapshot
-        # records the full screen-point set even after self.targets is
-        # narrowed to the recapture subset in pass 2.
-        self._original_targets: List[Tuple[int, int]] = []
         self.screen_width: Optional[int] = None
         self.screen_height: Optional[int] = None
         # Set externally (by App / wiring) once the scene camera reports its
@@ -178,9 +185,11 @@ class CalibrationRoutine:
         self.skipped_indices = []
         self.captured_pupil = []
         self.captured_scene = []
-        self.captured_target_indices = []
+        self.captured_screen = []
+        self.captured_fixation_ids = []
+        self._next_fixation_id = 0
+        self._superseded_fixation_ids = []
         self._in_pass_two = False
-        self._original_targets = []
         self.current_pose = 1
         self._awaiting_pose = False
         self.notice = ""
@@ -217,6 +226,8 @@ class CalibrationRoutine:
         self.is_collecting = True
         self.notice = ""
         self._last_sample_ts = time.time()
+        self._fixation_id = self._next_fixation_id
+        self._next_fixation_id += 1
         self.collector.begin()
 
     def begin_next_pose(self) -> None:
@@ -319,8 +330,8 @@ class CalibrationRoutine:
         target_v = float(proj[1] / proj[2])
 
         sample_idx = self.collector.sample_count()
-        img_name = f"fix{self.current_idx:02d}_sample{sample_idx:02d}.png"
-        scene_img_name = f"fix{self.current_idx:02d}_sample{sample_idx:02d}_scene.png"
+        img_name = f"fix{self._fixation_id:02d}_sample{sample_idx:02d}.png"
+        scene_img_name = f"fix{self._fixation_id:02d}_sample{sample_idx:02d}_scene.png"
         img_path = os.path.join(self.session_dir, img_name)
         scene_img_path = os.path.join(self.session_dir, scene_img_name)
         cv2.imwrite(img_path, eye_frame)
@@ -329,7 +340,7 @@ class CalibrationRoutine:
         px = float(pupil_center[0])
         py = float(pupil_center[1])
         self._pending_rows.append([
-            img_name, self.current_idx, tx, ty,
+            img_name, self._fixation_id, tx, ty,
             f"{px:.3f}", f"{py:.3f}", f"{confidence:.4f}", f"{time.time():.3f}",
             f"{target_u:.3f}", f"{target_v:.3f}",
         ])
@@ -356,7 +367,8 @@ class CalibrationRoutine:
     def _accept(self, result: CollectorAccept) -> None:
         self.captured_pupil.append(result.pupil_median)
         self.captured_scene.append(result.scene_median)
-        self.captured_target_indices.append(self.current_idx)
+        self.captured_screen.append(self.targets[self.current_idx])
+        self.captured_fixation_ids.append(self._fixation_id)
         self._log_aruco_check(result.scene_median)
         append_label_rows(self.labels_path, self._pending_rows)
         self._pending_rows = []
@@ -490,20 +502,18 @@ class CalibrationRoutine:
               f"(per-point LOO errs: "
               f"{[f'{errs[i]:.1f}px' for i in worst]}).")
 
-        # Capture the on-screen positions of the targets we're redoing
-        # before we mutate self.targets, and preserve the pass-1 target
-        # list for the saved snapshot.
-        recapture_target_pts = [self.targets[self.captured_target_indices[i]]
-                                for i in worst]
-        self._original_targets = list(self.targets)
+        # Worst indices are into the captured lists (skips excluded), so read
+        # the targets to redo from captured_screen, not self.targets.
+        recapture_target_pts = [self.captured_screen[i] for i in worst]
+        self._superseded_fixation_ids = [self.captured_fixation_ids[i]
+                                         for i in worst]
 
         keep_idx = [i for i in range(len(self.captured_pupil)) if i not in worst]
         self.captured_pupil = [self.captured_pupil[i] for i in keep_idx]
         self.captured_scene = [self.captured_scene[i] for i in keep_idx]
-        # Targets list is reset to the pass-2 set; index mapping inside
-        # captured_target_indices is no longer meaningful after this and
-        # we won't read it again (recapture only happens once).
-        self.captured_target_indices = []
+        self.captured_screen = [self.captured_screen[i] for i in keep_idx]
+        self.captured_fixation_ids = [self.captured_fixation_ids[i]
+                                      for i in keep_idx]
 
         self.targets = recapture_target_pts
         self.skipped_indices = []
@@ -553,20 +563,11 @@ class CalibrationRoutine:
         screen_size = ((self.screen_width, self.screen_height)
                        if self.screen_width is not None and self.screen_height is not None
                        else None)
-        # In pass 2 the captured_target_indices mapping is no longer valid
-        # (self.targets was narrowed to the recapture subset), so fall back to
-        # the preserved full pass-1 grid. Otherwise map each captured fixation
-        # back to its on-screen target so screen_points stays length-matched to
-        # pupil_vectors — across skips and across repeated grids in multi-pose.
-        if self._in_pass_two and self._original_targets:
-            screen_targets = self._original_targets
-        else:
-            screen_targets = [self.targets[idx]
-                              for idx in self.captured_target_indices]
         return CalibrationSnapshot(
             pupil_vectors=np.array(self.captured_pupil),
             scene_points=np.array(self.captured_scene),
-            screen_points=np.array(screen_targets),
+            screen_points=np.array(self.captured_screen),
+            superseded_fixation_ids=list(self._superseded_fixation_ids),
             aruco_screen_centers=aruco_screen_centers,
             scene_size=self.scene_size,
             screen_size=screen_size,
