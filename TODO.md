@@ -32,6 +32,8 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 - [ ] Eye cam at 120 fps (640x480 MJPG). Measured 121 fps alongside 1080p scene
       on the shared USB 2 hub, so bandwidth is fine. Update `HIGH_FPS_MODE` /
       `EYE_CAM_RESOLUTION` accordingly.
+      Note: the OV9281 has no 30 fps mode (MJPG is 100/120 only; YUYV 10 fps),
+      so it already runs at 100 by default, on the Mac too.
 
 ## Timestamping + sync
 
