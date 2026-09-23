@@ -44,6 +44,25 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       the host: LSL, or our own NTP-style exchange
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps
 
+## Accuracy: depth / parallax + headset slip
+
+Finding (2026-09-23): calibration labels, fit and live predict path all check
+out (quick 9-pt LOO ~14-28 px). Remaining error is physical. Gaze is only exact
+at the calibration depth (scene cam sits a few cm from the eye), and the
+pupil-only mapping is very slip-sensitive: a ~40 px pupil shift between two
+runs moved gaze by ~900 px.
+
+- [ ] Scene-cam intrinsics (`scripts/extras/calibrate_scene_intrinsics.py`);
+      also unlocks degree-based accuracy in `measure_gaze_accuracy.py`
+- [ ] Log calibration depth: solvePnP on the 4 ArUco markers (physical size
+      from `SCREEN_PHYSICAL_MM` / pixel pitch, ~29.8 mm marker) -> screen
+      distance + pose in `metadata.json`
+- [ ] Parallax model: calibrate at 2+ depths, use the eye-to-scene offset to
+      correct gaze for a given depth (needs a runtime depth source: assumed,
+      scene depth, or vergence from a second eye cam)
+- [ ] Slip robustness: reintroduce the glint as a pupil-CR reference, or a
+      quick 1-point drift correction before each use
+
 ## Housekeeping
 
 - [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
