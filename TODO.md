@@ -54,9 +54,18 @@ runs moved gaze by ~900 px.
 
 - [ ] Scene-cam intrinsics (`scripts/extras/calibrate_scene_intrinsics.py`);
       also unlocks degree-based accuracy in `measure_gaze_accuracy.py`
-- [ ] Log calibration depth: solvePnP on the 4 ArUco markers (physical size
-      from `SCREEN_PHYSICAL_MM` / pixel pitch, ~29.8 mm marker) -> screen
-      distance + pose in `metadata.json`
+- [ ] Per-sample ArUco data in the session dataset (store raw, derive later):
+      - `aruco.csv` per session, keyed by `image_path`: one row per detected
+        marker, `marker_id` + 4 corners x (x, y) in scene px. Separate file so
+        `labels.csv` stays narrow and partial detections (2-3 markers) fit.
+        Screen-side marker positions are static and already in `metadata.json`.
+      - `labels.csv`: add `homography_reproj_px` (per-sample quality flag) and
+        `screen_distance_mm` (null until scene intrinsics exist)
+      - Depth = solvePnP on the stored corners (marker ~29.8 mm, from
+        `SCREEN_PHYSICAL_MM` / pixel pitch) -> screen distance + pose. Raw
+        corners let it be backfilled for every session once intrinsics exist.
+      - Per sample, not per fixation, so head motion during capture shows up
+      - Update `docs/dataset_format.md` + a test
 - [ ] Parallax model: calibrate at 2+ depths, use the eye-to-scene offset to
       correct gaze for a given depth (needs a runtime depth source: assumed,
       scene depth, or vergence from a second eye cam)
