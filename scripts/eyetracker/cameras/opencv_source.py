@@ -13,6 +13,11 @@ Without it, a camera faster than the App loop (eye cam ~100 fps vs a ~30 Hz
 loop) fills the V4L2 buffer queue and read() hands back the OLDEST queued
 frame — measured ~130-275 ms stale on the Jetson. AVFoundation drops stale
 frames itself, which is why this never showed on macOS.
+
+Each frame carries a capture timestamp (CameraSource.last_timestamp). On Linux
+it's the V4L2 buffer timestamp (CLOCK_MONOTONIC), which is the camera's own
+hardware timestamp when uvcvideo hwtimestamps=1 (see v4l2.py); elsewhere it's
+time.monotonic() when the grabber received the frame.
 """
 import sys
 import threading
@@ -28,7 +33,11 @@ from scripts.eyetracker.cameras.uvc_util import (
     UvcExposureController,
     find_uvc_util,
 )
-from scripts.eyetracker.cameras.v4l2 import V4l2ExposureController, find_v4l2_ctl
+from scripts.eyetracker.cameras.v4l2 import (
+    V4l2ExposureController,
+    find_v4l2_ctl,
+    uvc_hw_timestamps_enabled,
+)
 
 IS_LINUX = sys.platform.startswith("linux")
 
@@ -60,6 +69,7 @@ class OpenCVCamera(CameraSource):
         # (successful or not) so read() never returns the same frame twice.
         self._cond = threading.Condition()
         self._frame: Optional[np.ndarray] = None
+        self._frame_ts: Optional[float] = None
         self._seq = 0
         self._read_seq = 0
         self._running = False
@@ -90,6 +100,10 @@ class OpenCVCamera(CameraSource):
             self._init_uvc_exposure(s)
         self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if IS_LINUX and not uvc_hw_timestamps_enabled():
+            print(f"[timestamps] cam {self.index}: uvcvideo hwtimestamps is off — "
+                  "frame times are host arrival (~2 ms jitter), not the camera "
+                  "clock. See cameras/v4l2.py:uvc_hw_timestamps_enabled.")
         self._running = True
         self._thread = threading.Thread(target=self._grab_loop, daemon=True,
                                         name=f"cam{self.index}-grab")
@@ -99,8 +113,17 @@ class OpenCVCamera(CameraSource):
     def _grab_loop(self) -> None:
         while self._running:
             ret, frame = self._cap.read()
+            if not ret:
+                ts = None
+            elif IS_LINUX:
+                # V4L2 buffer timestamp (ms, CLOCK_MONOTONIC) of this frame.
+                # Read on this thread, right after the grab it belongs to.
+                ts = self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            else:
+                ts = time.monotonic()
             with self._cond:
                 self._frame = frame if ret else None
+                self._frame_ts = ts
                 self._seq += 1
                 self._cond.notify_all()
             if not ret:
@@ -117,6 +140,7 @@ class OpenCVCamera(CameraSource):
                 return None
             self._read_seq = self._seq
             frame = self._frame
+            self.last_timestamp = self._frame_ts
         if frame is None:
             return None
         if self.settings.flip_vertical:

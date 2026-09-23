@@ -37,11 +37,23 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 
 ## Timestamping + sync
 
-- [ ] Hardware / driver frame timestamps for both cams (V4L2 buffer timestamps,
-      UVC PTS/SCR), logged per frame
+- [x] Hardware frame timestamps for both cams: uvcvideo `hwtimestamps=1` maps
+      each frame's PTS/SCR to host CLOCK_MONOTONIC (jitter ~2 ms -> ~0.01-0.04
+      ms). Recorded per frame by the grabber threads, logged per calibration
+      sample (`eye_frame_ts` / `scene_frame_ts`). Check: `probe_uvc_timestamps`
+- [ ] Make `hwtimestamps=1` persistent: `options uvcvideo hwtimestamps=1` in
+      `/etc/modprobe.d/uvcvideo.conf` (currently set at runtime, lost on reboot)
+- [ ] Measure each camera's fixed timestamp-to-exposure offset: point both cams
+      at one flashing patch on the monitor and compare onset frames. Eye cam's
+      stamp lands ~4 ms after first-packet arrival, so its PTS isn't exposure
+      start; scene's lands ~2.5 ms before. Same test gives display flip latency.
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
-- [ ] Clock offset / drift / round-trip estimation between camera clocks and
-      the host: LSL, or our own NTP-style exchange
+- [ ] Clock offset / drift: handled in-kernel via SCR (device clock vs USB
+      SOF vs host), no NTP/LSL needed on one host. Revisit LSL only for
+      multi-machine / other devices. Raw PTS/SCR aren't readable here: the
+      uvcvideo metadata node ('UVCH') delivers no buffers on 5.15-tegra.
+- [ ] Record the full eye + scene streams with timestamps (not just
+      calibration samples), e.g. extend `record.py` to log per-frame ts
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps
 
 ## Accuracy: depth / parallax + headset slip
@@ -76,5 +88,7 @@ runs moved gaze by ~900 px.
 
 - [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
       `cameras/v4l2.py` enumeration instead of hardcoded indexes
-- [ ] Eye cam dropped off USB once with `UVC probe control: -71` (fixed by
-      replug). If it recurs under load, try a powered hub.
+- [ ] Eye cam resets / drops off USB often (~25x on 2026-09-23, incl.
+      `can't read configurations, error -71`), worse through passive USB
+      extension cables. Try a powered hub near the headset / short or active
+      cables. Capture code should also survive a reset (reopen by USB id).

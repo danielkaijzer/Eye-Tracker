@@ -60,7 +60,7 @@ extrinsics jig and richer per-frame capture).
 ### `labels.csv` — per-sample ground truth
 Columns (see `LABELS_CSV_HEADER` in `calibration/persistence.py`):
 `image_path, fixation_id, x_screen, y_screen, pupil_x, pupil_y, confidence,
-timestamp, scene_target_x, scene_target_y`. Appended row-by-row during capture so a
+timestamp, scene_target_x, scene_target_y, eye_frame_ts, scene_frame_ts`. Appended row-by-row during capture so a
 mid-session crash keeps what was already written. `fixation_id` is unique within a
 session (one per capture attempt, so rejected/aborted attempts leave gaps) and
 names the images (`fix<id>_sample<n>.png`). A screen point can appear under
@@ -71,6 +71,17 @@ before 2026-09-23 reused ids across poses/recapture passes (and overwrote those
 images), so their `fixation_id` is unreliable there. Richer per-frame fields
 (ellipse params, pye3d 3D vectors, normalized-image paths) from
 `docs/data_collection.md` are added as the pipeline starts producing them.
+
+`timestamp` is wall-clock (`time.time()`) when the sample was taken.
+`eye_frame_ts` / `scene_frame_ts` are the capture times of the eye and scene
+frames the sample came from, in seconds on the host monotonic clock (Linux
+`CLOCK_MONOTONIC`, same as `time.monotonic()`), so they're comparable to each
+other and to any other monotonic timestamp logged on the same machine. With
+`uvcvideo hwtimestamps=1` they come from the cameras' own clocks (PTS/SCR,
+~0.01-0.03 ms frame-to-frame jitter); otherwise they're host arrival times
+(~2 ms jitter, plus transfer latency). Each camera still has an unmeasured
+fixed offset between its timestamp and true exposure. Absent in sessions
+recorded before these columns existed.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
 Produced by the extrinsics jig (a few days out). Schema is defined now; sessions

@@ -47,6 +47,7 @@ LABELS_CSV_HEADER = [
     "image_path", "fixation_id", "x_screen", "y_screen",
     "pupil_x", "pupil_y", "confidence", "timestamp",
     "scene_target_x", "scene_target_y",
+    "eye_frame_ts", "scene_frame_ts",
 ]
 
 

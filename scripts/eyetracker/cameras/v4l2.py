@@ -66,6 +66,19 @@ def index_for_usb_id(usb_id: str, exclude: Optional[int] = None) -> Optional[int
     return None
 
 
+def uvc_hw_timestamps_enabled() -> Optional[bool]:
+    """Whether uvcvideo converts the cameras' PTS/SCR into V4L2 buffer
+    timestamps (module param hwtimestamps). None if uvcvideo isn't loaded.
+
+    Off (the default), buffer timestamps are host arrival times with ~2 ms of
+    USB/IRQ jitter. On, they're the device's frame times mapped to host
+    CLOCK_MONOTONIC (~0.01-0.03 ms jitter measured on both rig cams). Enable
+    persistently with `options uvcvideo hwtimestamps=1` in
+    /etc/modprobe.d/uvcvideo.conf (or echo 1 into the param at runtime)."""
+    val = _read("/sys/module/uvcvideo/parameters/hwtimestamps")
+    return None if val is None else val.strip() not in ("0", "N")
+
+
 # ---- exposure ---------------------------------------------------------------
 
 # v4l2 control names changed in kernel 5.x (exposure_absolute ->

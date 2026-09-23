@@ -84,6 +84,10 @@ class App:
         self.last_eye_frame: Optional[np.ndarray] = None
         self.last_eye_frame_annotated: Optional[np.ndarray] = None
         self.last_scene_frame: Optional[np.ndarray] = None
+        # Capture timestamps (host monotonic s) of last_eye_frame /
+        # last_scene_frame; see CameraSource.last_timestamp.
+        self.last_eye_ts: Optional[float] = None
+        self.last_scene_ts: Optional[float] = None
         self._last_gate_log_ts: float = 0.0
 
     # ---- entry point --------------------------------------------------------
@@ -143,6 +147,7 @@ class App:
                 continue
             consecutive_read_failures = 0
 
+            self.last_eye_ts = self.eye_cam.last_timestamp
             self._process_eye_frame(eye_frame)
 
             was_calibration_active = self.routine.is_active
@@ -152,12 +157,15 @@ class App:
                     eye_frame=self.last_eye_frame,
                     scene_frame=self.last_scene_frame,
                     confidence=self.last_confidence,
+                    eye_ts=self.last_eye_ts,
+                    scene_ts=self.last_scene_ts,
                 )
 
             if self.scene_cam is not None:
                 ext_frame = self.scene_cam.read()
                 if ext_frame is not None:
                     self.last_scene_frame = ext_frame.copy()
+                    self.last_scene_ts = self.scene_cam.last_timestamp
                     # One ArUco detection per frame, cached — the routine's
                     # tick() reuses it via cached_homography(). Only needed
                     # while calibrating (routine, overlay HUD, preview are the

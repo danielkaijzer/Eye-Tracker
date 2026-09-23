@@ -11,6 +11,11 @@ class CameraSource(ABC):
 
     width: int = 0
     height: int = 0
+    # Capture time of the frame most recently returned by read(), in seconds
+    # on the host monotonic clock (== time.monotonic() on Linux), or None.
+    # With uvcvideo hwtimestamps=1 this is the camera's own frame timestamp
+    # (PTS) mapped to host time; otherwise it's when the frame reached the host.
+    last_timestamp: Optional[float] = None
 
     @abstractmethod
     def open(self) -> bool:

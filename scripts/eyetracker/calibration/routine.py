@@ -55,6 +55,11 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 _LOG_THROTTLE_S = 1.0
 
 
+def _fmt_ts(ts: Optional[float]) -> str:
+    """labels.csv cell for a frame timestamp (host monotonic s, µs precision)."""
+    return "" if ts is None else f"{ts:.6f}"
+
+
 class CalibrationRoutine:
     def __init__(self,
                  pattern: TargetPattern,
@@ -284,10 +289,14 @@ class CalibrationRoutine:
              pupil_center: Optional[np.ndarray],
              eye_frame: Optional[np.ndarray],
              scene_frame: Optional[np.ndarray],
-             confidence: float) -> None:
+             confidence: float,
+             eye_ts: Optional[float] = None,
+             scene_ts: Optional[float] = None) -> None:
         """Called every frame from the App loop. Only does work when
         `is_collecting` is True. The pupil_center/eye_frame are produced by
-        the pupil pipeline; pass them straight in."""
+        the pupil pipeline; pass them straight in. eye_ts/scene_ts are the
+        frames' capture timestamps (CameraSource.last_timestamp), logged per
+        sample so eye and scene frames can be aligned offline."""
         if not (self.is_active and self.is_collecting):
             return
         # Stall check first — the early-returns below (no pupil, no scene,
@@ -343,6 +352,7 @@ class CalibrationRoutine:
             img_name, self._fixation_id, tx, ty,
             f"{px:.3f}", f"{py:.3f}", f"{confidence:.4f}", f"{time.time():.3f}",
             f"{target_u:.3f}", f"{target_v:.3f}",
+            _fmt_ts(eye_ts), _fmt_ts(scene_ts),
         ])
         self._pending_image_paths.append(img_path)
         self._pending_image_paths.append(scene_img_path)
