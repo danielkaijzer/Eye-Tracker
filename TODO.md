@@ -43,8 +43,9 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       sample (`eye_frame_ts` / `scene_frame_ts`). Check: `probe_uvc_timestamps`
 - [ ] Make `hwtimestamps=1` persistent: `options uvcvideo hwtimestamps=1` in
       `/etc/modprobe.d/uvcvideo.conf` (currently set at runtime, lost on reboot)
-- [ ] Measure each camera's fixed timestamp-to-exposure offset: point both cams
-      at one flashing patch on the monitor and compare onset frames. Eye cam's
+- [ ] Measure each camera's fixed timestamp-to-exposure offset: run
+      `scripts/extras/flash_sync_test.py` (both cams on a flashing patch) and
+      record the eye - scene offset + per-camera latency vs flip. Eye cam's
       stamp lands ~4 ms after first-packet arrival, so its PTS isn't exposure
       start; scene's lands ~2.5 ms before. Same test gives display flip latency.
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
