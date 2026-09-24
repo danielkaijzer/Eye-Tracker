@@ -90,7 +90,12 @@ camera, when its timestamps say the light changed. Five handheld runs on
   relating frames to stimulus times logged the same way, such as dot onsets.
 
 The offset depends on exposure settings. Rerun the test if you change them,
-or if you change cameras.
+or if you change cameras. The eye cam normally runs on auto exposure, which
+settles at ~6 ms equivalent when aimed at the monitor, and never reports the
+value it picked (the control keeps the last manual value). So under auto
+exposure the offset is only approximate: a PTS taken after readout shifts by
+half of any exposure change relative to mid-exposure (up to ~5 ms across the
+0.5-9.9 ms range). Pinning the eye exposure removes that uncertainty.
 
 ## Known issues
 

@@ -32,10 +32,15 @@ HIGH_FPS_MODE = False
 # don't transfer to the other.
 EYE_CAM_FLIP_VERTICAL = False
 
-# The eye camera's exposure isn't driven from the app: its auto-exposure runs
-# internally on the sensor/bridge and can't be disabled over UVC, and the
-# IR-lit pupil doesn't need exposure control. Poke its gain from the terminal if
-# ever needed — see docs/uvc_exposure_cheatsheet.md (id 0x0c45:0x6366).
+# The eye camera's exposure isn't driven from the app yet; it runs on the
+# camera's auto exposure. (An older eye cam couldn't disable AE over UVC.) The
+# current Arducam OV9281 can, verified on Linux 2026-09-23: manual
+# exposure_time_absolute 5-99 (0.5-9.9 ms at 100 fps) scales the image as
+# expected. In auto mode it does NOT report the exposure it picked (the control
+# keeps the last manual value), so the real exposure can't be logged. Pin it
+# (manual) if exposure-dependent timing matters; see docs/timestamping.md.
+# Gain/exposure from the terminal: docs/uvc_exposure_cheatsheet.md
+# (id 0x0c45:0x6366, a Sonix bridge id shared by other cams).
 # On Linux the startup picker defaults to the camera with this USB id.
 EYE_UVC_ID = "0x0c45:0x6366"
 
