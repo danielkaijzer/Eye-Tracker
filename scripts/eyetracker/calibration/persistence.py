@@ -62,6 +62,8 @@ class CalibrationSnapshot:
     screen_size: Optional[Tuple[int, int]]
     # labels.csv fixation ids replaced by a pass-2 recapture (not in the fit).
     superseded_fixation_ids: List[int] = field(default_factory=list)
+    # What eye_frame_ts / scene_frame_ts are: {cam: {"source", "clock"}}.
+    frame_timestamps: Optional[dict] = None
 
 
 @dataclass
@@ -181,6 +183,7 @@ def write_session_metadata(session_dir: str,
                    "width_mm": SCREEN_PHYSICAL_MM[0],
                    "height_mm": SCREEN_PHYSICAL_MM[1]},
         "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None},
+        "frame_timestamps": snapshot.frame_timestamps,
         "eye_cam": {"width": eye_w, "height": eye_h, "fps": None,
                     "fov_deg": EYE_CAM_FOV_DEG, "identifier": None},
         "aruco": {

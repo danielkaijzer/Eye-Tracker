@@ -58,7 +58,8 @@ def test_recovers_offsets():
         np.testing.assert_allclose(np.median(fall), DISPLAY_LATENCY + off, atol=1e-3)
     with tempfile.TemporaryDirectory() as tmp:          # end-to-end: save + analyze
         path = os.path.join(tmp, "flash.npz")
-        np.savez_compressed(path, events=np.array(events), on_ms=300, hwtimestamps=True,
+        np.savez_compressed(path, events=np.array(events), on_ms=300,
+                            eye_clock="synthetic", scene_clock="synthetic",
                             eye_exposure=80, scene_exposure=332,
                             eye_ts=eye_ts, eye_frames=eye_fr, scene_ts=sc_ts, scene_frames=sc_fr)
         analyze(path)

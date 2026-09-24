@@ -66,17 +66,42 @@ def index_for_usb_id(usb_id: str, exclude: Optional[int] = None) -> Optional[int
     return None
 
 
-def uvc_hw_timestamps_enabled() -> Optional[bool]:
-    """Whether uvcvideo converts the cameras' PTS/SCR into V4L2 buffer
-    timestamps (module param hwtimestamps). None if uvcvideo isn't loaded.
+def metadata_node_for(capture_index: int) -> Optional[str]:
+    """/dev/videoN of the UVC metadata node paired with a capture node (same
+    USB interface, sysfs `index` 1), or None if the camera has none."""
+    want = os.path.realpath(os.path.join(_SYSFS, f"video{capture_index}", "device"))
+    for path in sorted(glob.glob(os.path.join(_SYSFS, "video*"))):
+        if _read(os.path.join(path, "index")) != "1":
+            continue
+        if os.path.realpath(os.path.join(path, "device")) == want:
+            return "/dev/" + os.path.basename(path)
+    return None
 
-    Off (the default), buffer timestamps are host arrival times with ~2 ms of
-    USB/IRQ jitter. On, they're the device's frame times mapped to host
-    CLOCK_MONOTONIC (~0.01-0.03 ms jitter measured on both rig cams). Enable
-    persistently with `options uvcvideo hwtimestamps=1` in
-    /etc/modprobe.d/uvcvideo.conf (or echo 1 into the param at runtime)."""
-    val = _read("/sys/module/uvcvideo/parameters/hwtimestamps")
+
+def uvcvideo_flag(name: str) -> Optional[bool]:
+    """A boolean-ish uvcvideo module parameter (e.g. "nodrop",
+    "hwtimestamps"), or None if uvcvideo isn't loaded."""
+    val = _read(f"/sys/module/uvcvideo/parameters/{name}")
     return None if val is None else val.strip() not in ("0", "N")
+
+
+def uvc_timestamp_setup_problem() -> Optional[str]:
+    """Why camera-clock timestamps (cameras/uvc_clock.py) can't work with the
+    current uvcvideo settings, or None if they can. Needs nodrop=1 (else the
+    metadata node delivers nothing) and hwtimestamps=0 (else video buffer
+    timestamps are rewritten by the kernel's conversion, which drifts on the
+    eye cam, and no longer match their metadata buffers). Persist with
+    `options uvcvideo nodrop=1 hwtimestamps=0` in /etc/modprobe.d/uvcvideo.conf
+    and reload the module."""
+    nodrop, hw = uvcvideo_flag("nodrop"), uvcvideo_flag("hwtimestamps")
+    if nodrop is None:
+        return "uvcvideo not loaded"
+    problems = []
+    if not nodrop:
+        problems.append("nodrop=0 (need 1)")
+    if hw:
+        problems.append("hwtimestamps=1 (need 0)")
+    return ", ".join(problems) or None
 
 
 # ---- exposure ---------------------------------------------------------------

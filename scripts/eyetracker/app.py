@@ -106,6 +106,7 @@ class App:
 
         for routine in self._all_routines:
             routine.jump_gate = self.jump_gate
+            routine.frame_timestamp_info = self._frame_timestamp_info
         self.display.open()
 
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
@@ -208,6 +209,15 @@ class App:
                 self.smoother.reset()
 
     # ---- per-stage helpers --------------------------------------------------
+
+    def _frame_timestamp_info(self) -> dict:
+        """What eye_frame_ts / scene_frame_ts are, for session metadata."""
+        info = {}
+        for name, cam in (("eye", self.eye_cam), ("scene", self.scene_cam)):
+            if cam is not None:
+                info[name] = {"source": cam.last_timestamp_source,
+                              "clock": cam.timestamp_clock_info()}
+        return info
 
     def _process_eye_frame(self, frame: np.ndarray) -> None:
         """Crop, run pupil detector, gate, draw, send to display."""

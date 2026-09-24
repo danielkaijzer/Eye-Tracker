@@ -1,11 +1,16 @@
 """Flash test: measure each camera's frame-timestamp offset against real light.
 
-Why: frame timestamps (CameraSource.last_timestamp, uvcvideo hwtimestamps=1)
-are on the host monotonic clock with ~0.01-0.04 ms jitter, but each camera
-stamps a different, undocumented point of its capture (the eye cam's stamp
-even lands after its first USB packet, so it isn't exposure start). Pairing
-eye/scene frames by equal timestamps is therefore off by a fixed per-camera
-amount. This test measures it.
+Why: frame timestamps (CameraSource.last_timestamp; camera PTS converted in
+userspace, cameras/uvc_clock.py) are on the host monotonic clock with
+sub-0.1 ms precision, but they mark when each camera starts *sending* a frame
+(PTS lands ~0.06-0.3 ms before the first USB packet on both rig cams), after
+exposure, readout and JPEG encoding. That delay is fixed per camera and
+differs between them, so pairing eye/scene frames by equal timestamps is off
+by a constant. This test measures it.
+
+History: the first runs used the kernel's conversion (hwtimestamps=1); the eye
+cam's latency drifted 1.5-2.4 ms/s within a run and its offset jumped by
+>100 ms between runs, which exposed the kernel bug uvc_clock.py works around.
 
 How: a fullscreen window flashes a white square on black ~30 times at random
 intervals and logs each flip on the host clock. Both cameras look at the
@@ -55,7 +60,7 @@ from scripts.eyetracker.cameras.opencv_source import OpenCVCamera
 from scripts.eyetracker.cameras.v4l2 import (
     find_v4l2_ctl,
     index_for_usb_id,
-    uvc_hw_timestamps_enabled,
+    uvc_timestamp_setup_problem,
 )
 from scripts.eyetracker.config import EYE_UVC_ID, SCENE_UVC_ID
 
@@ -72,7 +77,7 @@ class _Recorder:
 
     def __init__(self, name, cam):
         self.name, self.cam = name, cam
-        self.ts, self.frames = [], []
+        self.ts, self.frames, self.sources = [], [], []
         self.latest = None
         self.recording = False
         self._stop = False
@@ -93,6 +98,7 @@ class _Recorder:
             if self.recording:
                 self.ts.append(self.cam.last_timestamp)
                 self.frames.append(small)
+                self.sources.append(self.cam.last_timestamp_source or "")
 
     def stop(self):
         self._stop = True
@@ -288,13 +294,24 @@ def analyze(path):
     d = np.load(path, allow_pickle=True)
     events = [tuple(e) for e in d["events"]]
     on_s = float(d["on_ms"]) / 1e3
+    if "hwtimestamps" in d.files:       # runs from before uvc_clock.py
+        clock = f"kernel hwtimestamps={'on' if d['hwtimestamps'] else 'off'}"
+    else:
+        clock = "timestamps " + ", ".join(f"{n}: {d[n + '_clock']}" for n in ("eye", "scene"))
     print(f"\n{os.path.basename(path)}: {sum(1 for _, s in events if s)} flashes, "
-          f"hwtimestamps={'on' if d['hwtimestamps'] else 'OFF'}, "
-          f"eye exposure {d['eye_exposure']}, scene exposure {d['scene_exposure']} "
-          f"(units of 100 us)")
+          f"{clock}, eye exposure {d['eye_exposure']}, scene exposure "
+          f"{d['scene_exposure']} (units of 100 us)")
     res = {}
     for name in ("eye", "scene"):
         ts, frames = d[f"{name}_ts"], d[f"{name}_frames"].astype(np.float32)
+        if f"{name}_src" in d.files:
+            # Only camera-clock frames: a fallback frame (metadata lookup
+            # missed) is a different time reference, off by ~2 ms.
+            src = d[f"{name}_src"]
+            good = src == "uvc_pts"
+            if good.any() and not good.all():
+                print(f"  ({name}: dropping {int((~good).sum())} frames without camera-clock timestamps)")
+                ts, frames = ts[good], frames[good]
         b, contrast = _brightness(frames, ts, events, on_s)
         period = np.median(np.diff(ts)) * 1e3 if len(ts) > 1 else float("nan")
         print(f"\n{name}: {len(ts)} frames, period {period:.3f} ms, flash contrast "
@@ -339,10 +356,10 @@ def main():
         analyze(args.analyze)
         return
 
-    hw = uvc_hw_timestamps_enabled()
-    if not hw:
-        print("WARNING: uvcvideo hwtimestamps is off; results will reflect host "
-              "arrival times, not camera clocks.")
+    problem = uvc_timestamp_setup_problem()
+    if problem:
+        print(f"WARNING: camera-clock timestamps unavailable ({problem}); results "
+              "will reflect host arrival times.")
     eye_idx, scene_idx = index_for_usb_id(EYE_UVC_ID), index_for_usb_id(SCENE_UVC_ID)
     if eye_idx is None or scene_idx is None:
         print(f"cameras not found (eye {eye_idx}, scene {scene_idx})")
@@ -359,6 +376,7 @@ def main():
     eye_ae = _get_ctrl(eye_dev, "auto_exposure")
     _v4l2(eye_dev, "-c", f"auto_exposure=1,exposure_time_absolute={args.eye_exposure}")
     recorders = [_Recorder("eye", eye_cam), _Recorder("scene", scene_cam)]
+    clocks = {}
     try:
         for r in recorders:
             r.start()
@@ -367,6 +385,7 @@ def main():
     finally:
         for r in recorders:
             r.stop()
+        clocks = {r.name: (r.cam.timestamp_clock_info() or "host arrival") for r in recorders}
         eye_exp = _get_ctrl(eye_dev, "exposure_time_absolute")
         scene_exp = _get_ctrl(scene_dev, "exposure_time_absolute")
         if eye_ae is not None:
@@ -382,7 +401,9 @@ def main():
     path = os.path.join(out_dir, f"flash_{datetime.datetime.now():%Y%m%d_%H%M%S}.npz")
     np.savez_compressed(
         path, events=np.array(win.events), on_ms=args.on_ms,
-        hwtimestamps=bool(hw), eye_exposure=eye_exp, scene_exposure=scene_exp,
+        eye_exposure=eye_exp, scene_exposure=scene_exp,
+        **{f"{r.name}_clock": clocks[r.name] for r in recorders},
+        **{f"{r.name}_src": np.array(r.sources) for r in recorders},
         **{f"{r.name}_ts": np.array(r.ts) for r in recorders},
         **{f"{r.name}_frames": np.array(r.frames, dtype=np.uint8) for r in recorders})
     print(f"saved {path}")

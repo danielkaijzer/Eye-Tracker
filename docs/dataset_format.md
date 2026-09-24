@@ -47,6 +47,8 @@ extrinsics jig and richer per-frame capture).
   "software": { "pupil_detector": null, "pye3d": null, "app_git_sha": null },
   "screen":   { "width": w, "height": h },
   "scene_cam":{ "width": w, "height": h, "fps": null, "identifier": null },
+  "frame_timestamps": { "eye": { "source": "uvc_pts", "clock": "device clock ... MHz, envelope residual ... ms" },
+                        "scene": { ... } },
   "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null },
   "aruco":    { "dict_name": "...", "dict_id": n, "marker_px": n, "quiet_zone_px": n,
                 "ids": [...], "screen_centers": [[x, y], ...] },
@@ -76,12 +78,15 @@ images), so their `fixation_id` is unreliable there. Richer per-frame fields
 `eye_frame_ts` / `scene_frame_ts` are the capture times of the eye and scene
 frames the sample came from, in seconds on the host monotonic clock (Linux
 `CLOCK_MONOTONIC`, same as `time.monotonic()`), so they're comparable to each
-other and to any other monotonic timestamp logged on the same machine. With
-`uvcvideo hwtimestamps=1` they come from the cameras' own clocks (PTS/SCR,
-~0.01-0.03 ms frame-to-frame jitter); otherwise they're host arrival times
-(~2 ms jitter, plus transfer latency). Each camera still has an unmeasured
-fixed offset between its timestamp and true exposure. Absent in sessions
-recorded before these columns existed.
+other and to any other monotonic timestamp logged on the same machine.
+Normally they're each camera's own PTS converted to host time through its SCR
+clock samples (`cameras/uvc_clock.py`, ~0.001 ms frame-to-frame jitter, no
+drift); that marks when the camera starts sending the frame, a fixed
+per-camera delay after exposure (measured by
+`scripts/extras/flash_sync_test.py`). If the UVC metadata isn't available they
+fall back to host arrival times (~2 ms jitter). `metadata.json`
+`frame_timestamps` records the source and clock fit per camera. Absent in
+sessions recorded before these columns existed.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
 Produced by the extrinsics jig (a few days out). Schema is defined now; sessions

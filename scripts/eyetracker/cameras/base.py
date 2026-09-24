@@ -13,9 +13,12 @@ class CameraSource(ABC):
     height: int = 0
     # Capture time of the frame most recently returned by read(), in seconds
     # on the host monotonic clock (== time.monotonic() on Linux), or None.
-    # With uvcvideo hwtimestamps=1 this is the camera's own frame timestamp
-    # (PTS) mapped to host time; otherwise it's when the frame reached the host.
+    # last_timestamp_source says what it is: "uvc_pts" = the camera's own
+    # frame timestamp converted to host time (cameras/uvc_clock.py),
+    # "v4l2_buffer" = host arrival of the frame's first USB packet,
+    # "grab_time" = when the app received the frame.
     last_timestamp: Optional[float] = None
+    last_timestamp_source: Optional[str] = None
 
     @abstractmethod
     def open(self) -> bool:
@@ -40,6 +43,11 @@ class CameraSource(ABC):
         Fractional so it feels consistent regardless of the underlying control's
         scale. Return True if applied."""
         return False
+
+    def timestamp_clock_info(self) -> Optional[str]:
+        """Short description of the camera-clock fit behind last_timestamp
+        (rate, residual), or None if the source has none."""
+        return None
 
     def exposure_status(self) -> Optional[str]:
         """Short human label for the on-screen readout (e.g. "exp 400"), or None

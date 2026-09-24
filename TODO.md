@@ -37,25 +37,31 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 
 ## Timestamping + sync
 
-- [x] Hardware frame timestamps for both cams: uvcvideo `hwtimestamps=1` maps
-      each frame's PTS/SCR to host CLOCK_MONOTONIC (jitter ~2 ms -> ~0.01-0.04
-      ms). Recorded per frame by the grabber threads, logged per calibration
-      sample (`eye_frame_ts` / `scene_frame_ts`). Check: `probe_uvc_timestamps`
-- [ ] Make `hwtimestamps=1` persistent: `options uvcvideo hwtimestamps=1` in
-      `/etc/modprobe.d/uvcvideo.conf` (currently set at runtime, lost on reboot)
-- [ ] Measure each camera's fixed timestamp-to-exposure offset: run
-      `scripts/extras/flash_sync_test.py` (both cams on a flashing patch) and
-      record the eye - scene offset + per-camera latency vs flip. Eye cam's
-      stamp lands ~4 ms after first-packet arrival, so its PTS isn't exposure
-      start; scene's lands ~2.5 ms before. Same test gives display flip latency.
+- [x] Camera-clock frame timestamps for both cams: each frame's UVC PTS is
+      converted to host CLOCK_MONOTONIC in userspace through its SCR samples
+      (`cameras/uvc_clock.py`): ~0.001 ms period jitter, drift vs host within
+      +/-5 ppm. Logged per calibration sample (`eye_frame_ts` /
+      `scene_frame_ts`); source + clock fit in `metadata.json`. Check:
+      `probe_uvc_timestamps`. Needs `options uvcvideo nodrop=1 hwtimestamps=0`
+      in `/etc/modprobe.d/uvcvideo.conf` (set on the Jetson 2026-09-23).
+      Why not the kernel's conversion (hwtimestamps=1): the eye cam's bridge
+      reports a free-running SOF counter in SCR (~1003/s), which the 5.15
+      driver trusts, so its stamps drifted ~2600 ppm and jumped >100 ms.
+      Kernel 6.8+ has a quirk for this class of camera.
+- [ ] Measure each camera's fixed PTS-to-exposure offset: rerun
+      `scripts/extras/flash_sync_test.py` on the userspace timestamps and
+      record the eye - scene offset + per-camera latency vs flip. Both cams'
+      PTS mark the start of sending a frame (~0.06-0.3 ms before its first USB
+      packet), i.e. after exposure + readout + encode. Same test gives display
+      flip latency.
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
-- [ ] Clock offset / drift: handled in-kernel via SCR (device clock vs USB
-      SOF vs host), no NTP/LSL needed on one host. Revisit LSL only for
-      multi-machine / other devices. Raw PTS/SCR aren't readable here: the
-      uvcvideo metadata node ('UVCH') delivers no buffers on 5.15-tegra.
+- [ ] `nodrop=1` also delivers video frames uvcvideo flags as corrupt (none seen
+      so far); guard against truncated MJPEG frames if they show up
 - [ ] Record the full eye + scene streams with timestamps (not just
       calibration samples), e.g. extend `record.py` to log per-frame ts
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps
+- [ ] Multi-machine / other devices (EEG etc.): LSL on top of these timestamps.
+      Not needed on one host.
 
 ## Accuracy: depth / parallax + headset slip
 
