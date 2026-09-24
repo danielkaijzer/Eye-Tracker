@@ -18,9 +18,11 @@ useful part. Entries marked *unverified* haven't been confirmed on the rig.
   calibration depth (eye↔scene parallax), and the pupil-only mapping is very
   slip-sensitive (a ~40 px pupil shift between runs moved gaze ~900 px).
   → `TODO.md` (Accuracy)
-- 2026-07-13 · *Unverified:* undistorting marker corners before `findHomography`
-  cut geometric error at non-anchor points by ~1.2 px in a synthetic test with the
-  real distortion coefficients. → branch `use-intrinsics-for-homography`
+- 2026-09-24 · Scene-cam lens distortion reaches ~12 px at the frame edges (0 at
+  center). In a synthetic screen seen through the real lens model, the old
+  raw-pixel homography misses calibration targets by 1.7 px mean / 2.8 px max; the
+  distortion-aware solve is exact. *Unverified on the rig.*
+  → `tests/test_aruco_homography_undistort.py`
 - 2026-06-29 · A half-finished hat-matrix LOO refactor once returned all-zero LOO
   errors, silently breaking recapture targeting and accuracy reports.
   → `docs/loo_error_notes.md`, `tests/test_polynomial_loo.py`
