@@ -1,45 +1,49 @@
 # TODO
 
-Running backlog. Check items off as they land. Put the branch/PR next to an
-item while it's in flight. Detailed per-feature plans get their own
-`TODO_<topic>.md` (e.g. `TODO_multipose_coverage.md`).
+Running backlog of open work. Put the branch/PR next to an item while it's in
+flight; check it off when the work is done on its branch, and delete it once
+that merges (git history keeps it). Move any finding worth keeping (a
+measurement, a gotcha) into the relevant doc first. Detailed per-feature plans
+get their own `TODO_<topic>.md` (e.g. `TODO_multipose_coverage.md`).
 
 Rig: Jetson Orin (JetPack 6, Ubuntu 22.04) + Philips 221V8LB @ 1920x1080 100 Hz.
 Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
+What we've learned so far: `docs/findings.md`.
 
-## Linux port (`linux-jetson-support`)
+## Next up
 
-- [x] V4L2 + MJPG capture (YUYV caps 1080p at 5 fps)
-- [x] Scene-cam exposure via `v4l2-ctl`; pin frame rate (`exposure_dynamic_framerate=0`)
-- [x] Pick scene cam / default eye cam by USB id (two `/dev/video` nodes per camera)
-- [x] Monitor model + physical mm in session `metadata.json`
-- [x] Monitor at 100 Hz, persisted in `~/.config/monitors.xml`
-- [x] Headset-on quick calibration on the Jetson
+In order; details in the items below. Update this list at every milestone.
+
+1. Test and merge `timestamping` (`git pull` on the Jetson first)
+2. Pin the eye cam mode (Capture architecture)
+3. On the rig: undistorted-homography check, then merge `use-intrinsics-for-homography`
+4. Print and paste the jig boards; run eye intrinsics + extrinsics (Accuracy)
+5. Record the rig calibration in session `metadata.json`, then polish data collection
+
+Steps 3 and 4 can share one session at the rig.
+
+## Linux port
+
 - [ ] Check the scene exposure hotkeys and `metadata.json` from a real session
-- [x] Open PR (#37, merged)
 
 ## Capture architecture
 
-- [x] One grabber thread per camera keeping only the newest frame (eye frame
-      age 275 ms -> 13 ms on the Jetson). ArUco only runs during calibration.
-- [ ] Stamp each frame on arrival in the grabber thread (feeds timestamping below)
+- [ ] Stamp each frame on arrival in the grabber thread (feeds timestamping below).
+      Done on `timestamping`.
 - [ ] App loop still blocks on the 30 fps scene read, so the eye is processed
       at ~30 Hz, not ~100. Decouple so every eye frame is processed.
 - [ ] ArUco on full 1080p is ~45 ms/frame, so the loop drops to ~14 Hz during
       calibration. Try detecting on a downscaled frame and rescaling corners.
 - [ ] Jetson power mode: currently 15W; try `sudo nvpmodel -m 2` (MAXN_SUPER)
 - [ ] Main loop consumes the latest eye frame; scene frames matched by timestamp
-- [ ] Eye cam at 120 fps (640x480 MJPG). Measured 121 fps alongside 1080p scene
-      on the shared USB 2 hub, so bandwidth is fine. Update `HIGH_FPS_MODE` /
-      `EYE_CAM_RESOLUTION` accordingly.
-      Note: the OV9281 has no 30 fps mode (MJPG is 100/120 only; YUYV 10 fps),
-      so it already runs at 100 by default, on the Mac too.
-      Also: `EYE_CAM_FOV_DEG` (80° diagonal) is the old Sonix lens. Eye frames
-      are cropped to 4:3 and resized to 640x480 before detection, so the
-      effective FOV depends on the OV9281's native mode and that crop. It sets
-      pye3d's focal length and goes into `metadata.json`: pin the eye mode
-      explicitly, then derive the FOV (~70° horizontal lens) or use measured
-      eye intrinsics (`calibrate_eye_intrinsics.py`, see the extrinsics item).
+- [ ] Pin the eye cam mode: request it in `_eye_cam_settings()` (today it's the
+      driver default, so the cropped 640x480 frame's geometry can change). On the
+      rig, compare the field of view at 640x480 vs 1280x800 (full sensor or a
+      crop?), and consider 120 fps (640x480 MJPG measured 121 fps alongside the
+      1080p scene on the shared USB 2 hub; `HIGH_FPS_MODE`).
+- [ ] Then use the measured eye focal length (fx in `eye_intrinsics.json`) for
+      pye3d and `metadata.json` instead of `EYE_CAM_FOV_DEG` (80°, the old Sonix
+      lens)
 
 ## Timestamping + sync
 
@@ -52,11 +56,8 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 
 ## Accuracy: depth / parallax + headset slip
 
-Finding (2026-09-23): calibration labels, fit and live predict path all check
-out (quick 9-pt LOO ~14-28 px). Remaining error is physical. Gaze is only exact
-at the calibration depth (scene cam sits a few cm from the eye), and the
-pupil-only mapping is very slip-sensitive: a ~40 px pupil shift between two
-runs moved gaze by ~900 px.
+Remaining error is physical (depth parallax + headset slip), not the
+calibration code: see the 2026-09-23 entry in `docs/findings.md`.
 
 - [ ] Scene-cam intrinsics (`scripts/extras/calibrate_scene_intrinsics.py`);
       also unlocks degree-based accuracy in `measure_gaze_accuracy.py`
@@ -72,10 +73,7 @@ runs moved gaze by ~900 px.
         corners let it be backfilled for every session once intrinsics exist.
       - Per sample, not per fixation, so head motion during capture shows up
       - Update `docs/dataset_format.md` + a test
-- [x] Port the jig calibration scripts (`calibrate_eye_intrinsics.py`,
-      `calibrate_extrinsics.py`): app frame geometry, JSON in/out, shared board
-      specs, synthetic solve test (`tests/test_extrinsics_solve.py`)
-- [ ] Eye↔scene extrinsics on the rig. Pin the eye mode first (FOV item above):
+- [ ] Eye↔scene extrinsics on the rig. Pin the eye mode first (Capture architecture):
       eye intrinsics only hold for one native mode + crop. Laser-print the
       `tiny` board for the eye side (sized for eye distance, no refocus) and
       pick a scene-side size, paste them on the jig, then run

@@ -20,7 +20,7 @@ pip uninstall -y opencv-python                  # pupil-detectors pulls it in; i
 pip install --force-reinstall --no-deps opencv-contrib-python==4.13.0.92
 ```
 
-Your user must be in the `video` group to open `/dev/video*`. Cameras are opened through V4L2 with MJPG. The scene cam is picked by its USB id (`SCENE_UVC_ID` in `config.py`) because each UVC camera shows up as two `/dev/video` nodes. Exposure hotkeys go through `v4l2-ctl`. When launching over SSH, target the attached monitor with `DISPLAY=:0`.
+Your user must be in the `video` group to open `/dev/video*`. Cameras are opened through V4L2 with MJPG. The scene cam is picked by its USB id (`SCENE_UVC_ID` in `config.py`) because each UVC camera shows up as two `/dev/video` nodes. Exposure hotkeys go through `v4l2-ctl`. When launching over SSH, target the attached monitor with `DISPLAY=:0`. The calibration monitor runs at 100 Hz; on the Jetson that mode is persisted in `~/.config/monitors.xml`.
 
 **macOS** (demo mode):
 
@@ -89,6 +89,7 @@ scripts/extras/             # Standalone utilities
     measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions
 
 docs/                       # Implementation notes, citations, architecture
+    findings.md                     # What we've measured, decided, or learned (dated)
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
     loo_error_notes.md              # Leave-one-out error: what it measures, past regression
     calibration_coverage.md         # The coverage problem + eccentricity validation tooling
