@@ -1,8 +1,7 @@
 # Claude Guidelines
 
 ## Git & Version Control
-- Don't commit or push unless I ask. When I ask, go ahead and do it.
-- Otherwise, suggest commits and commit messages but leave the git operations to me.
+- Always check with me before committing or pushing. Proposing it is fine (suggest the commit and message, then ask), but don't run it until I say yes.
 - **Never add attribution to commits or PRs**: no `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" line. I direct the work, so it's credited to me.
 
 ## Environment
