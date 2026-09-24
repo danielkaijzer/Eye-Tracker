@@ -2,8 +2,7 @@
 
 Quick reference for driving the rig's cameras with **uvc-util** from the command
 line, independent of the app. OpenCV/AVFoundation can't set exposure on macOS, so
-this is the only working path. See `docs/` and the `project_macos_uvc_exposure`
-notes for the why.
+this is the only working path. On Linux, use `v4l2-ctl` instead.
 
 ## Setup
 
@@ -13,7 +12,7 @@ a camera by its USB **vendor:product** id (stable across replug, unlike the inde
 ```bash
 B=/opt/homebrew/bin/uvc-util
 SCENE="--select-by-vendor-and-product-id=0x0bda:0xd565"   # Realtek bridge / OV5640
-EYE="--select-by-vendor-and-product-id=0x0c45:0x6366"     # Sonix GC0308
+EYE="--select-by-vendor-and-product-id=0x0c45:0x6366"     # Arducam OV9281 (was Sonix GC0308)
 ```
 
 List what's connected / what a camera supports:
@@ -72,23 +71,20 @@ $B $SCENE -s exposure-time-abs=250   # tune down until markers are crisp, not gl
 
 ## Eye camera (`0x0c45:0x6366`)
 
-**The eye cam's auto-exposure runs internally on the sensor/bridge and can't be
-disabled over UVC.** `auto-exposure-mode` writes register (read back as 1 or 8)
-but don't stop the internal AEC, so there's no true manual exposure here.
-`gain` is the only control with any image effect (scales output luminance), and
-even that gets partly compensated by the AEC. `exposure-time-abs` is a no-op.
-None of this matters in practice — the IR-lit pupil doesn't need exposure control.
-
-| Control | Range | Default | What it does |
-|---|---|---|---|
-| `gain` | 0–100 | 0 | scales luminance; partly fought by the internal AEC |
-| `exposure-time-abs` | 1–5000 | 157 | no-op on this module |
-| `auto-exposure-mode` | 1, 8 | 8 | register toggles but doesn't disable the internal AEC |
+The eye cam is now the **Arducam OV9281** (serial UC762). It reuses the old Sonix
+GC0308 module's VID:PID, so `$EYE` selects whichever one is plugged in. Unlike
+the Sonix, the OV9281 implements the full UVC exposure set: `exposure-time-abs`
+(units of 100 µs, range 1–5000, default 157), `auto-exposure-mode` (default 8 =
+aperture priority) and `gain`, all read-back verified.
 
 ```bash
-$B $EYE -g gain
-$B $EYE -s gain=10      # has some effect, but the AEC will compensate
+$B $EYE -s auto-exposure-mode=1        # manual
+$B $EYE -s exposure-time-abs=50        # 5 ms
+$B $EYE -g exposure-time-abs
 ```
+
+(The retired Sonix module ran its auto-exposure internally and ignored these
+writes; only `gain` had any effect.)
 
 ---
 

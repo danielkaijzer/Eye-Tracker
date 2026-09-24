@@ -5,13 +5,11 @@ macOS — set() no-ops and get() returns 0. uvc-util sends UVC class requests
 over IOKit *independently* of the capture session, so it works while OpenCV is
 streaming.
 
-Scope: this drives the **scene camera's** manual exposure only. The scene module
-(Realtek OV5640) is manual-only and its real brightness lever is
-`exposure-time-abs` (gain just scales output luminance). The eye module's
-exposure runs internally on the sensor and isn't controllable over UVC, so the
-app doesn't drive it — poke it from the terminal if needed
-(docs/uvc_exposure_cheatsheet.md). The controller stays parameterized on the
-control name so it isn't hard-wired to one cam.
+Scope: manual exposure for whichever camera it's given by USB id. The scene
+module (Realtek OV5640) is manual-only and its real brightness lever is
+`exposure-time-abs` (gain just scales output luminance). The controller is
+parameterized on the control name so it isn't hard-wired to one cam. Linux uses
+cameras/v4l2.py instead. Terminal equivalents: docs/uvc_exposure_cheatsheet.md.
 
 Gotcha this defends against: uvc-util's `-s` (set) returns exit 0 even when the
 device silently ignores or clamps the write, so every set is confirmed with a

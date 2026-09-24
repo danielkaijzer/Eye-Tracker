@@ -7,8 +7,9 @@ Two independent least-squares fits — one for scene_x, one for scene_y.
 LOO error = leave-one-out reprojection error in scene-cam pixels;
 per-point LOO errors are returned for two-pass recapture logic.
 
-TODO: Small efficiency add: use the hat-matrix identity, where LOO residual = ordinary residual / (1 − hᵢᵢ) 
-    instead of refitting from scratch in a loop
+Possible optimization, not needed at current grid sizes: the hat-matrix identity
+(LOO residual = ordinary residual / (1 − hᵢᵢ)) avoids the per-point refits. A
+half-finished attempt once zeroed every LOO error; see docs/loo_error_notes.md.
 """
 import math
 from typing import Optional

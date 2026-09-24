@@ -64,7 +64,7 @@ Flow:
 4. After the **final** pose, all `(pupil, scene)` pairs across every pose feed one
    `lstsq` fit (the existing `_finish` path).
 
-So 5 poses × a 12-point grid → ~60 points feeding one degree-3 fit, spanning a much wider
+So 3 poses × a 12-point grid → 36 points (60 with all 5 poses) feeding one degree-3 fit, spanning a much wider
 slice of the oculomotor range than 20 head-on points.
 
 Two-pass **recapture is disabled** in multi-pose (`recapture_worst_n = 0`). Recapture
@@ -77,7 +77,7 @@ In `scripts/eyetracker/config.py`:
 
 | Constant | Meaning |
 | --- | --- |
-| `CALIB_POSES` | number of head poses (default 5: head-on, left, right, down, up) |
+| `CALIB_POSES` | number of head poses (default 3: head-on, left, right; up to 5 adds down, up) |
 | `CALIB_MULTIPOSE_ROWS` / `_COLS` / `_MARGIN` | grid per pose (default 4×3, margin 180) |
 | `CALIB_MULTIPOSE_DEGREE` | polynomial degree (default 3 — plenty of points to support it) |
 | `CALIB_POSE_GUIDANCE` | per-pose instruction strings shown on the overlay |
@@ -114,9 +114,9 @@ Multi-pose is exactly the kind of change that needs the
 confirm — "feels better" isn't measurable. End-to-end:
 
 1. Capture a held-out wide-angle set once with `v` (steep head angle). Keep this
-   `validation_<ts>.npz` fixed so it's a fair yardstick across runs.
+   validation session fixed so it's a fair yardstick across runs.
 2. Measure your **current head-on** calibration against it:
-   `python -m scripts.extras.measure_gaze_accuracy --val scripts/eyetracker/validation_*.npz`
+   `python -m scripts.extras.measure_gaze_accuracy --val data/calibration/session_<validation ts>`
    — expect large error in the outer eccentricity bins (the gap).
 3. Recalibrate with `m` across all poses (don't touch the headset), confirming LOO stays
    under the usable threshold (`0.04 × scene_width`).
@@ -128,5 +128,5 @@ confirm — "feels better" isn't measurable. End-to-end:
 Multi-pose reuses the screen + ArUco rig, so coverage is still bounded by screen size and
 marker visibility. A more scalable rig for the model dataset is **world-fixed fiducials**
 — a printed ArUco wall or poster — letting targets span the full scene FOV independently
-of any screen, and dovetailing with the planned extrinsics jig. That's deliberately out
+of any screen, and dovetailing with the extrinsics jig. That's deliberately out
 of scope here; multi-pose is the no-new-hardware step.

@@ -16,7 +16,7 @@ each dot's screen pixel into its location in the scene-camera image. For each do
 record one `(pupil_pixel, scene_pixel)` pair — pupil center from the eye camera,
 scene pixel from the homography. After the grid we least-squares-fit a degree-2 or
 degree-3 bivariate polynomial `pupil → scene` (`scripts/eyetracker/gaze/polynomial.py`).
-Two grids ship today: quick (`c`, 4×3, degree 2) and detailed (`d`, 5×4, degree 3,
+Two grids ship today: quick (`c`, 3×3, degree 2) and detailed (`d`, 5×4, degree 3,
 with worst-point recapture). Grid sizes, margins, and degrees live in
 `scripts/eyetracker/config.py` under `CALIB_QUICK_*` / `CALIB_DETAILED_*`.
 
@@ -100,10 +100,10 @@ calibrated. Two pieces fix this.
 ### 1. Held-out capture — the `v` key
 
 `v` runs the same grid as the detailed calibration but in **collect-only** mode: it
-fits nothing and never touches the live `calibration_pupil.npz` or the in-memory mapper
+fits nothing and never touches the live `calibration.json` or the in-memory mapper
 (`CalibrationRoutine(fit_on_finish=False)` in `scripts/eyetracker/calibration/routine.py`).
-On finish it writes the captured `(pupil, scene)` median pairs to a timestamped
-`validation_<ts>.npz` (`save_validation` in `calibration/persistence.py`).
+It saves a normal `data/calibration/session_<ts>/` (labels.csv + metadata.json) tagged
+`phase: validation`, with no fit.
 
 The point: capture a `v` set **at a steep head angle** so its gaze points land at high
 eccentricity — out where the calibration never sampled. That gives you ground-truth
@@ -111,7 +111,7 @@ pairs the fit has never seen, in the region you most want to test.
 
 ### 2. Eccentricity-binned measurement
 
-`python -m scripts.extras.measure_gaze_accuracy [--val validation_*.npz]` refits the
+`python -m scripts.extras.measure_gaze_accuracy [--val <validation session dir>]` refits the
 polynomial from a saved calibration and reports error binned by eccentricity:
 
 - **In-sample**, using **leave-one-out** error (refit without each point, predict it).
@@ -152,7 +152,7 @@ down.
 
 - **Eccentricity is an approximation to true gaze angle.** It's measured in the scene-cam
   frame relative to the principal point, assuming the scene cam looks along head-forward
-  and ignoring eye↔scene parallax and target depth. With the planned extrinsics jig (see
+  and ignoring eye↔scene parallax and target depth. With eye↔scene extrinsics from the calibration jig (see
   `docs/data_collection.md`) and a depth estimate, this could become a true
   eye-relative visual angle.
 - **The polynomial itself is the ceiling.** Widening coverage fixes catastrophic
