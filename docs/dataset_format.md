@@ -46,8 +46,11 @@ extrinsics jig and richer per-frame capture).
   "subject_id": null, "glasses": null, "headset_model_version": null, "kappa_deg": null,
   "software": { "pupil_detector": null, "pye3d": null, "app_git_sha": null },
   "screen":   { "width": w, "height": h },
-  "scene_cam":{ "width": w, "height": h, "fps": null, "identifier": null },
-  "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null },
+  "scene_cam":{ "width": w, "height": h, "fps": null, "identifier": null,
+                "exposure_ms": 33.2, "timestamp_source": "uvc_pts",
+                "timestamp_clock": "device clock ... MHz (... ppm), envelope residual ... ms" },
+  "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null,
+                "exposure_ms": 6.3, "timestamp_source": "uvc_pts", "timestamp_clock": "..." },
   "aruco":    { "dict_name": "...", "dict_id": n, "marker_px": n, "quiet_zone_px": n,
                 "ids": [...], "screen_centers": [[x, y], ...] },
   "superseded_fixation_ids": [],
@@ -60,7 +63,7 @@ extrinsics jig and richer per-frame capture).
 ### `labels.csv` — per-sample ground truth
 Columns (see `LABELS_CSV_HEADER` in `calibration/persistence.py`):
 `image_path, fixation_id, x_screen, y_screen, pupil_x, pupil_y, confidence,
-timestamp, scene_target_x, scene_target_y`. Appended row-by-row during capture so a
+timestamp, scene_target_x, scene_target_y, eye_frame_ts, scene_frame_ts`. Appended row-by-row during capture so a
 mid-session crash keeps what was already written. `fixation_id` is unique within a
 session (one per capture attempt, so rejected/aborted attempts leave gaps) and
 names the images (`fix<id>_sample<n>.png`). A screen point can appear under
@@ -71,6 +74,22 @@ before 2026-09-23 reused ids across poses/recapture passes (and overwrote those
 images), so their `fixation_id` is unreliable there. Richer per-frame fields
 (ellipse params, pye3d 3D vectors, normalized-image paths) from
 `docs/data_collection.md` are added as the pipeline starts producing them.
+
+`timestamp` is wall-clock (`time.time()`) when the sample was taken.
+`eye_frame_ts` / `scene_frame_ts` are the capture times of the eye and scene
+frames the sample came from, in seconds on the host monotonic clock (Linux
+`CLOCK_MONOTONIC`, same as `time.monotonic()`), so they're comparable to each
+other and to any other monotonic timestamp logged on the same machine.
+Normally they're each camera's own PTS converted to host time through its SCR
+clock samples (`cameras/uvc_clock.py`, ~0.001 ms frame-to-frame jitter, no
+drift); that marks when the camera starts sending the frame, a fixed
+per-camera delay after exposure (measured by
+`scripts/extras/flash_sync_test.py`). If the UVC metadata isn't available they
+fall back to host arrival times (~2 ms jitter). `metadata.json`
+`eye_cam` / `scene_cam` record `timestamp_source` + `timestamp_clock` (the
+clock fit) and `exposure_ms` (manual exposure in force, null if unknown). The
+eye cam runs at one locked manual exposure per session (`config.EYE_EXPOSURE`).
+All absent in sessions recorded before these fields existed.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
 Produced by the extrinsics jig (a few days out). Schema is defined now; sessions

@@ -89,6 +89,7 @@ docs/                       # Implementation notes, citations, architecture
     multipose_calibration.md        # Multi-pose calibration: widening FOV coverage
     data_collection.md              # Fields the data-collection pipeline captures
     dataset_format.md               # On-disk format for sessions + calibration artifacts
+    timestamping.md                 # Camera-clock frame timestamps (Linux) + eye/scene offset
     citations/                      # references.bib + references.tex
     architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
 

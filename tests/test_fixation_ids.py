@@ -43,6 +43,7 @@ def _pupil_for(target, rng):
 
 def _run(routine, rng, skip_first=False):
     snapshots = []
+    clock = [1000.0]   # fake monotonic frame timestamps (s)
     with tempfile.TemporaryDirectory() as tmp:
         labels = os.path.join(tmp, "labels.csv")
         with open(labels, "w", newline="") as f:
@@ -63,8 +64,10 @@ def _run(routine, rng, skip_first=False):
                 pupil = _pupil_for(routine.targets[routine.current_idx], rng)
                 routine.begin_capture()
                 while routine.is_collecting:
+                    clock[0] += 0.01
                     routine.tick(pupil_center=pupil + rng.normal(0, 0.2, 2),
-                                 eye_frame=frame, scene_frame=frame, confidence=1.0)
+                                 eye_frame=frame, scene_frame=frame, confidence=1.0,
+                                 eye_ts=clock[0], scene_ts=clock[0] - 0.02)
             with open(labels) as f:
                 rows = list(csv.DictReader(f))
             images = sorted(os.listdir(tmp))
@@ -121,6 +124,15 @@ def test_recapture_with_skip_redoes_the_right_targets():
     _check_snapshot_aligned(snap)
 
 
+def test_frame_timestamps_logged():
+    rng = np.random.default_rng(3)
+    rows, _, _ = _run(_routine(3, 3, degree=2), rng)
+    eye = np.array([float(r["eye_frame_ts"]) for r in rows])
+    scene = np.array([float(r["scene_frame_ts"]) for r in rows])
+    assert np.all(np.diff(eye) > 0)                    # per-sample, increasing
+    np.testing.assert_allclose(eye - scene, 0.02, atol=1e-6)   # paired per row
+
+
 def test_multipose_fixation_ids_span_poses():
     rng = np.random.default_rng(2)
     rows, images, snap = _run(_routine(3, 4, degree=2, poses=3), rng)
@@ -132,5 +144,6 @@ def test_multipose_fixation_ids_span_poses():
 if __name__ == "__main__":
     test_recapture_gets_new_fixation_ids()
     test_recapture_with_skip_redoes_the_right_targets()
+    test_frame_timestamps_logged()
     test_multipose_fixation_ids_span_poses()
     print("ok")

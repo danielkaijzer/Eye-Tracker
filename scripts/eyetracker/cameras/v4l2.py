@@ -66,6 +66,44 @@ def index_for_usb_id(usb_id: str, exclude: Optional[int] = None) -> Optional[int
     return None
 
 
+def metadata_node_for(capture_index: int) -> Optional[str]:
+    """/dev/videoN of the UVC metadata node paired with a capture node (same
+    USB interface, sysfs `index` 1), or None if the camera has none."""
+    want = os.path.realpath(os.path.join(_SYSFS, f"video{capture_index}", "device"))
+    for path in sorted(glob.glob(os.path.join(_SYSFS, "video*"))):
+        if _read(os.path.join(path, "index")) != "1":
+            continue
+        if os.path.realpath(os.path.join(path, "device")) == want:
+            return "/dev/" + os.path.basename(path)
+    return None
+
+
+def uvcvideo_flag(name: str) -> Optional[bool]:
+    """A boolean-ish uvcvideo module parameter (e.g. "nodrop",
+    "hwtimestamps"), or None if uvcvideo isn't loaded."""
+    val = _read(f"/sys/module/uvcvideo/parameters/{name}")
+    return None if val is None else val.strip() not in ("0", "N")
+
+
+def uvc_timestamp_setup_problem() -> Optional[str]:
+    """Why camera-clock timestamps (cameras/uvc_clock.py) can't work with the
+    current uvcvideo settings, or None if they can. Needs nodrop=1 (else the
+    metadata node delivers nothing) and hwtimestamps=0 (else video buffer
+    timestamps are rewritten by the kernel's conversion, which drifts on the
+    eye cam, and no longer match their metadata buffers). Persist with
+    `options uvcvideo nodrop=1 hwtimestamps=0` in /etc/modprobe.d/uvcvideo.conf
+    and reload the module."""
+    nodrop, hw = uvcvideo_flag("nodrop"), uvcvideo_flag("hwtimestamps")
+    if nodrop is None:
+        return "uvcvideo not loaded"
+    problems = []
+    if not nodrop:
+        problems.append("nodrop=0 (need 1)")
+    if hw:
+        problems.append("hwtimestamps=1 (need 0)")
+    return ", ".join(problems) or None
+
+
 # ---- exposure ---------------------------------------------------------------
 
 # v4l2 control names changed in kernel 5.x (exposure_absolute ->
@@ -162,6 +200,15 @@ class V4l2ExposureController:
             return False
         self._value = got
         return True
+
+    @property
+    def value(self) -> Optional[int]:
+        """Last confirmed exposure value (device units), or None."""
+        return self._value
+
+    @property
+    def value_range(self) -> Tuple[int, int]:
+        return self._value_min, self._value_max
 
     def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
         if self._value is None:

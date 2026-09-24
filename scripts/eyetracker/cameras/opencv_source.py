@@ -13,12 +13,19 @@ Without it, a camera faster than the App loop (eye cam ~100 fps vs a ~30 Hz
 loop) fills the V4L2 buffer queue and read() hands back the OLDEST queued
 frame — measured ~130-275 ms stale on the Jetson. AVFoundation drops stale
 frames itself, which is why this never showed on macOS.
+
+Each frame carries a capture timestamp (CameraSource.last_timestamp), on the
+host monotonic clock. On Linux it's the camera's own PTS converted through its
+SCR clock samples (cameras/uvc_clock.py) when the metadata node is usable,
+else the V4L2 buffer timestamp (host arrival of the first packet). Elsewhere
+it's time.monotonic() when the grabber received the frame.
+last_timestamp_source says which ("uvc_pts", "v4l2_buffer", "grab_time").
 """
 import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -28,7 +35,13 @@ from scripts.eyetracker.cameras.uvc_util import (
     UvcExposureController,
     find_uvc_util,
 )
-from scripts.eyetracker.cameras.v4l2 import V4l2ExposureController, find_v4l2_ctl
+from scripts.eyetracker.cameras.uvc_clock import UvcTimestamper
+from scripts.eyetracker.cameras.v4l2 import (
+    V4l2ExposureController,
+    find_v4l2_ctl,
+    metadata_node_for,
+    uvc_timestamp_setup_problem,
+)
 
 IS_LINUX = sys.platform.startswith("linux")
 
@@ -60,7 +73,11 @@ class OpenCVCamera(CameraSource):
         # (successful or not) so read() never returns the same frame twice.
         self._cond = threading.Condition()
         self._frame: Optional[np.ndarray] = None
+        self._frame_ts: Optional[float] = None
+        self._frame_ts_source: Optional[str] = None
         self._seq = 0
+        self.last_timestamp_source: Optional[str] = None
+        self._timestamper: Optional[UvcTimestamper] = None
         self._read_seq = 0
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -90,6 +107,8 @@ class OpenCVCamera(CameraSource):
             self._init_uvc_exposure(s)
         self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        if IS_LINUX:
+            self._timestamper = self._start_timestamper()
         self._running = True
         self._thread = threading.Thread(target=self._grab_loop, daemon=True,
                                         name=f"cam{self.index}-grab")
@@ -99,8 +118,24 @@ class OpenCVCamera(CameraSource):
     def _grab_loop(self) -> None:
         while self._running:
             ret, frame = self._cap.read()
+            ts, source = None, None
+            if not ret:
+                pass
+            elif IS_LINUX:
+                # V4L2 buffer timestamp (ms, CLOCK_MONOTONIC) of this frame.
+                # Read on this thread, right after the grab it belongs to; it's
+                # also the key to this frame's metadata (camera PTS).
+                ts, source = self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0, "v4l2_buffer"
+                if self._timestamper is not None:
+                    pts = self._timestamper.lookup(ts)
+                    if pts is not None:
+                        ts, source = pts, "uvc_pts"
+            else:
+                ts, source = time.monotonic(), "grab_time"
             with self._cond:
                 self._frame = frame if ret else None
+                self._frame_ts = ts
+                self._frame_ts_source = source
                 self._seq += 1
                 self._cond.notify_all()
             if not ret:
@@ -117,17 +152,51 @@ class OpenCVCamera(CameraSource):
                 return None
             self._read_seq = self._seq
             frame = self._frame
+            self.last_timestamp = self._frame_ts
+            self.last_timestamp_source = self._frame_ts_source
         if frame is None:
             return None
         if self.settings.flip_vertical:
             frame = cv2.flip(frame, 0)
         return frame
 
+    def _start_timestamper(self) -> Optional[UvcTimestamper]:
+        """Camera-clock timestamps via the UVC metadata node, or None (frames
+        then keep V4L2 buffer timestamps: host arrival, ~2 ms jitter)."""
+        problem = uvc_timestamp_setup_problem()
+        meta = metadata_node_for(self.index)
+        if problem is None and meta is None:
+            problem = "no UVC metadata node"
+        if problem is None:
+            ts = UvcTimestamper(meta)
+            try:
+                ts.start()
+            except OSError as e:
+                problem = f"{meta}: {e}"
+            else:
+                print(f"[timestamps] cam {self.index}: camera clock (UVC PTS/SCR via {meta})")
+                return ts
+        print(f"[timestamps] cam {self.index}: host arrival times only — {problem}. "
+              "See cameras/v4l2.py:uvc_timestamp_setup_problem.")
+        return None
+
+    def timestamp_clock_info(self) -> Optional[str]:
+        """Short description of the camera-clock fit, for diagnostics."""
+        t = self._timestamper
+        if t is None or not t.clock.ready:
+            return None
+        ppm = (t.clock.rate_hz / t.clock.nominal_hz - 1) * 1e6
+        return (f"device clock {t.clock.rate_hz / 1e6:.6f} MHz ({ppm:+.0f} ppm), "
+                f"envelope residual {t.clock.envelope_residual_ms:.3f} ms")
+
     def release(self) -> None:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        if self._timestamper is not None:
+            self._timestamper.stop()
+            self._timestamper = None
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -157,3 +226,21 @@ class OpenCVCamera(CameraSource):
 
     def exposure_status(self) -> Optional[str]:
         return self._uvc.status_str() if self._uvc is not None else None
+
+    def exposure_value(self) -> Optional[int]:
+        return self._uvc.value if self._uvc is not None else None
+
+    def exposure_limits(self) -> Optional[Tuple[int, int]]:
+        if self._uvc is None:
+            return None
+        lo, hi = self._uvc.value_range
+        fps = self._cap.get(cv2.CAP_PROP_FPS) if self._cap is not None else 0
+        if fps and fps > 0:
+            hi = min(hi, int(10000 / fps) - 1)    # 100 us units per frame period
+        return lo, hi
+
+    def set_exposure(self, value: int) -> bool:
+        limits = self.exposure_limits()
+        if limits is None:
+            return False
+        return self._uvc.set_exposure(int(max(limits[0], min(limits[1], value))))

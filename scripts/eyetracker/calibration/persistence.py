@@ -47,6 +47,7 @@ LABELS_CSV_HEADER = [
     "image_path", "fixation_id", "x_screen", "y_screen",
     "pupil_x", "pupil_y", "confidence", "timestamp",
     "scene_target_x", "scene_target_y",
+    "eye_frame_ts", "scene_frame_ts",
 ]
 
 
@@ -61,6 +62,9 @@ class CalibrationSnapshot:
     screen_size: Optional[Tuple[int, int]]
     # labels.csv fixation ids replaced by a pass-2 recapture (not in the fit).
     superseded_fixation_ids: List[int] = field(default_factory=list)
+    # Per-camera capture settings, {"eye"|"scene": {...}}: exposure and what
+    # eye_frame_ts / scene_frame_ts are. Merged into eye_cam / scene_cam.
+    camera_info: Optional[dict] = None
 
 
 @dataclass
@@ -165,6 +169,7 @@ def write_session_metadata(session_dir: str,
     sw, sh = snapshot.scene_size if snapshot.scene_size else (None, None)
     pw, ph = snapshot.screen_size if snapshot.screen_size else (None, None)
     eye_w, eye_h = EYE_CAM_RESOLUTION
+    cam_info = snapshot.camera_info or {}
     aruco_dict_id = int(cv2.aruco.DICT_4X4_50) if hasattr(cv2, "aruco") else -1
     meta = {
         "session_id": os.path.basename(os.path.normpath(session_dir)),
@@ -179,9 +184,11 @@ def write_session_metadata(session_dir: str,
         "screen": {"width": pw, "height": ph, "model": SCREEN_MODEL,
                    "width_mm": SCREEN_PHYSICAL_MM[0],
                    "height_mm": SCREEN_PHYSICAL_MM[1]},
-        "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None},
+        "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None,
+                      **cam_info.get("scene", {})},
         "eye_cam": {"width": eye_w, "height": eye_h, "fps": None,
-                    "fov_deg": EYE_CAM_FOV_DEG, "identifier": None},
+                    "fov_deg": EYE_CAM_FOV_DEG, "identifier": None,
+                    **cam_info.get("eye", {})},
         "aruco": {
             "dict_name": ARUCO_DICT_NAME,
             "dict_id": aruco_dict_id,

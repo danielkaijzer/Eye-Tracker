@@ -135,6 +135,15 @@ class UvcExposureController:
         self._value = got
         return True
 
+    @property
+    def value(self) -> Optional[int]:
+        """Last confirmed exposure value (device units), or None."""
+        return self._value
+
+    @property
+    def value_range(self) -> Tuple[int, int]:
+        return self._value_min, self._value_max
+
     def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
         """Step the lever by a fraction of its range (direction +1/-1). A
         fraction keeps the feel consistent across controls whose ranges differ

@@ -37,12 +37,45 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 
 ## Timestamping + sync
 
-- [ ] Hardware / driver frame timestamps for both cams (V4L2 buffer timestamps,
-      UVC PTS/SCR), logged per frame
+- [x] Camera-clock frame timestamps for both cams: each frame's UVC PTS is
+      converted to host CLOCK_MONOTONIC in userspace through its SCR samples
+      (`cameras/uvc_clock.py`): ~0.001 ms period jitter, drift vs host within
+      +/-5 ppm. Logged per calibration sample (`eye_frame_ts` /
+      `scene_frame_ts`); source + clock fit in `metadata.json`. Check:
+      `probe_uvc_timestamps`. Needs `options uvcvideo nodrop=1 hwtimestamps=0`
+      in `/etc/modprobe.d/uvcvideo.conf` (set on the Jetson 2026-09-23).
+      Why not the kernel's conversion (hwtimestamps=1): the eye cam's bridge
+      reports a free-running SOF counter in SCR (~1003/s), which the 5.15
+      driver trusts, so its stamps drifted ~2600 ppm and jumped >100 ms.
+      Kernel 6.8+ has a quirk for this class of camera.
+- [x] Eye - scene timestamp offset (flash test, 5 runs): 4.8 ms, +/-0.3 ms
+      run to run, ~+/-2 ms systematic (edge-dependent). Pair frames by light
+      with `eye_frame_ts - 0.0048`. Details: `docs/timestamping.md`. Rerun if
+      exposure settings or cameras change.
+- [x] Eye exposure locked per session: manual mode + one-shot software AE at
+      startup (`EYE_EXPOSURE`, `exposure_settle.py`), recorded in metadata. The
+      OV9281's own AE never reports its exposure, so it can't be logged.
+- [ ] Verify the exposure dependence of the eye offset (E/2 model): flash test
+      at `--eye-exposure 20` and `90`; expect ~3.5 ms shift
+- [ ] Absolute eye timestamp-to-light offset (display-independent): an IR LED
+      driven from a Jetson GPIO pin in view of the eye cam, toggled with host
+      timestamps. Matters for click-label timing / latency studies
+- [ ] Click-event labels for passive recording: host input timestamps (evdev
+      events can be switched to CLOCK_MONOTONIC via EVIOCSCLOCKID) + click
+      x,y; pick eye frames in a window before each click
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
-- [ ] Clock offset / drift / round-trip estimation between camera clocks and
-      the host: LSL, or our own NTP-style exchange
+- [ ] Reject corrupt MJPEG frames in the App. `nodrop=1` lets uvcvideo deliver
+      frames it flags as corrupt: 3 in one handheld flash run (cables moving),
+      0 in 2 min stationary (15,662 frames). A raw-bytes EOI check
+      (`CAP_PROP_CONVERT_RGB=0` + `cv2.imdecode`) only catches truncation;
+      catching mid-frame loss needs a strict decoder (libturbojpeg +
+      PyTurboJPEG, `TJFLAG_STOPONWARNING`).
+- [ ] Record the full eye + scene streams with timestamps (not just
+      calibration samples): a recorder on the `cameras/` grabber threads that
+      logs per-frame ts (the old eye-only MP4 `record.py` was removed)
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps
+- [ ] Multi-machine / other devices (EEG etc.): LSL on top of these timestamps.
+      Not needed on one host.
 
 ## Accuracy: depth / parallax + headset slip
 
@@ -74,7 +107,7 @@ runs moved gaze by ~900 px.
 
 ## Housekeeping
 
-- [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
-      `cameras/v4l2.py` enumeration instead of hardcoded indexes
-- [ ] Eye cam dropped off USB once with `UVC probe control: -71` (fixed by
-      replug). If it recurs under load, try a powered hub.
+- [ ] Eye cam resets / drops off USB often (~25x on 2026-09-23, incl.
+      `can't read configurations, error -71`), worse through passive USB
+      extension cables. Try a powered hub near the headset / short or active
+      cables. Capture code should also survive a reset (reopen by USB id).
