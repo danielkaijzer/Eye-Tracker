@@ -71,7 +71,8 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       catching mid-frame loss needs a strict decoder (libturbojpeg +
       PyTurboJPEG, `TJFLAG_STOPONWARNING`).
 - [ ] Record the full eye + scene streams with timestamps (not just
-      calibration samples), e.g. extend `record.py` to log per-frame ts
+      calibration samples): a recorder on the `cameras/` grabber threads that
+      logs per-frame ts (the old eye-only MP4 `record.py` was removed)
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps
 - [ ] Multi-machine / other devices (EEG etc.): LSL on top of these timestamps.
       Not needed on one host.
@@ -106,8 +107,6 @@ runs moved gaze by ~900 px.
 
 ## Housekeeping
 
-- [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
-      `cameras/v4l2.py` enumeration instead of hardcoded indexes
 - [ ] Eye cam resets / drops off USB often (~25x on 2026-09-23, incl.
       `can't read configurations, error -71`), worse through passive USB
       extension cables. Try a powered hub near the headset / short or active
