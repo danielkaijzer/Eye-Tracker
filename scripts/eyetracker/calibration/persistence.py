@@ -19,8 +19,8 @@ import datetime
 import json
 import os
 import time
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -37,6 +37,8 @@ from scripts.eyetracker.config import (
     ARUCO_QUIET_ZONE_PX,
     EYE_CAM_FOV_DEG,
     EYE_CAM_RESOLUTION,
+    SCREEN_MODEL,
+    SCREEN_PHYSICAL_MM,
 )
 from scripts.eyetracker.gaze.base import FitReport, GazeMapper
 
@@ -57,6 +59,8 @@ class CalibrationSnapshot:
     aruco_screen_centers: np.ndarray  # (4, 2) or (0, 2) if no ArUco context
     scene_size: Optional[Tuple[int, int]]
     screen_size: Optional[Tuple[int, int]]
+    # labels.csv fixation ids replaced by a pass-2 recapture (not in the fit).
+    superseded_fixation_ids: List[int] = field(default_factory=list)
 
 
 @dataclass
@@ -172,7 +176,9 @@ def write_session_metadata(session_dir: str,
         "headset_model_version": None,
         "kappa_deg": None,
         "software": {"pupil_detector": None, "pye3d": None, "app_git_sha": None},
-        "screen": {"width": pw, "height": ph},
+        "screen": {"width": pw, "height": ph, "model": SCREEN_MODEL,
+                   "width_mm": SCREEN_PHYSICAL_MM[0],
+                   "height_mm": SCREEN_PHYSICAL_MM[1]},
         "scene_cam": {"width": sw, "height": sh, "fps": None, "identifier": None},
         "eye_cam": {"width": eye_w, "height": eye_h, "fps": None,
                     "fov_deg": EYE_CAM_FOV_DEG, "identifier": None},
@@ -184,6 +190,7 @@ def write_session_metadata(session_dir: str,
             "ids": list(ARUCO_IDS),
             "screen_centers": _to_list(snapshot.aruco_screen_centers),
         },
+        "superseded_fixation_ids": list(snapshot.superseded_fixation_ids),
         "rig_calibration_id": None,
         "intrinsics": {"eye": None, "scene": _scene_intrinsics_snapshot()},
         "extrinsics": None,

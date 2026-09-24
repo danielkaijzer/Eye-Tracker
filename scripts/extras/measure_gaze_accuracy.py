@@ -60,6 +60,9 @@ def _load_fixation_medians(session_dir: str):
     (metadata, pupil_vectors, scene_points, screen_points); metadata is None for
     legacy sessions with no metadata.json."""
     metadata, df = load_session(session_dir)
+    # Drop pass-1 fixations a recapture replaced, matching the live fit.
+    superseded = (metadata or {}).get("superseded_fixation_ids") or []
+    df = df[~df["fixation_id"].isin(superseded)]
     grouped = df.groupby("fixation_id").median(numeric_only=True)
     pupil_vectors = grouped[["pupil_x", "pupil_y"]].to_numpy(dtype=float)
     scene_points = grouped[["scene_target_x", "scene_target_y"]].to_numpy(dtype=float)
