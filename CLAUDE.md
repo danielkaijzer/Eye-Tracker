@@ -5,6 +5,17 @@
 - Always ask before pushing to `main`, force-pushing, rewriting pushed history, or deleting branches. Merging PRs is mine.
 - **Never add attribution to commits or PRs**: no `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" line. I direct the work, so it's credited to me.
 
+## TODO tracking
+- `TODO.md` is the single backlog (big features get a `TODO_<topic>.md` spec).
+  Read it at the start of a session.
+- Update it at milestones: after a commit that finishes or changes tracked work,
+  and after a PR merges. Delete items whose PR merged, fix items the work made
+  stale, and add follow-ups discovered along the way.
+- Before deleting an item, move any finding worth keeping into the relevant doc.
+- `TODO.md` changes on several branches at once: keep edits to the sections your
+  work touches, and check open branches for conflicts before pushing.
+- If unsure whether an item is still open, ask.
+
 ## Environment
 - Python env: conda env `et`. Tests: `python -m pytest tests`.
 - Linux (Jetson Orin, V4L2) is the research platform: data collection and
