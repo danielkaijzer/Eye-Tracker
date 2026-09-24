@@ -374,10 +374,16 @@ def main():
     if not (eye_cam.open() and scene_cam.open()):
         print("failed to open cameras")
         return
-    # A kill (Ctrl-C in another terminal, timeout) must still run the finally
-    # below, or the eye cam is left in manual exposure.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+    # A kill, Ctrl-C or closed terminal must still run the finally below, or
+    # the eye cam is left in manual exposure (it keeps the setting across
+    # driver reloads until power-cycled).
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, lambda *_: sys.exit(1))
     eye_ae = _get_ctrl(eye_dev, "auto_exposure")
+    if eye_ae == 1 and _get_ctrl(eye_dev, "exposure_time_absolute") == args.eye_exposure:
+        # Manual at exactly our test value: almost certainly left over from
+        # an earlier run that died before restoring. Restore auto instead.
+        eye_ae = 3
     _v4l2(eye_dev, "-c", f"auto_exposure=1,exposure_time_absolute={args.eye_exposure}")
     recorders = [_Recorder("eye", eye_cam), _Recorder("scene", scene_cam)]
     clocks = {}
