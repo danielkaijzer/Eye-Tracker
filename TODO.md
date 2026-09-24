@@ -54,6 +54,10 @@ runs moved gaze by ~900 px.
 
 - [ ] Scene-cam intrinsics (`scripts/extras/calibrate_scene_intrinsics.py`);
       also unlocks degree-based accuracy in `measure_gaze_accuracy.py`
+- [ ] Undistorted homography (`use-intrinsics-for-homography`): on the rig, run
+      one calibration with and one without `scene_intrinsics.json` and compare
+      the `ArUco check` err near the frame edges, then merge. The loader doesn't
+      check the file's image size against the capture resolution yet.
 - [ ] Per-sample ArUco data in the session dataset (store raw, derive later):
       - `aruco.csv` per session, keyed by `image_path`: one row per detected
         marker, `marker_id` + 4 corners x (x, y) in scene px. Separate file so

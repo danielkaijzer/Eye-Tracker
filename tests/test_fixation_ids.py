@@ -30,6 +30,9 @@ class _FakeTargetMapper:
     def cached_homography(self):
         return np.eye(3), 0.0
 
+    def project_via_homography(self, xy_screen, H):
+        return float(xy_screen[0]), float(xy_screen[1])
+
     def screen_anchor_points(self):
         return None
 
