@@ -3,14 +3,14 @@
 ## Git & Version Control
 - Use your judgment on committing and pushing to feature branches once a change is complete and verified; ask if unsure.
 - Always ask before pushing to `main`, force-pushing, rewriting pushed history, or deleting branches. Merging PRs is mine.
-- Also ask before pushing to a branch I'm working on elsewhere, even though it's a feature branch.
 - After pushing a new feature branch, open its PR with `gh pr create` (concise title, description of what changed and why, how it was verified). As the branch grows, update the description with `gh pr edit`. Never merge.
 - **Never add attribution to commits or PRs**: no `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" line. I direct the work, so it's credited to me.
 
 ## Working with me
-- The physical rig sometimes runs ahead of the repo (e.g., the calibration jig and the eye
-  cam's LED both changed without doc updates). Before building on a hardware
-  assumption from docs or code, confirm it with me. But don't ask for confirmation every single time. Use your judgment here. If you know I have hardware changes planned or recently made hardware changes, then it makes sense to ask for confirmation. 
+- The physical rig sometimes runs ahead of the repo (e.g., the calibration jig and
+  the eye cam's LED both changed without doc updates). When I've recently changed
+  or plan to change some hardware, confirm related assumptions from docs or code
+  with me before building on them. Otherwise use your judgment; don't ask every time.
 - Keep the repo lean: prefer deleting dead code and stale docs (git keeps the
   history) to keeping them around, but don't make changes for their own sake.
 - Process and organization suggestions are welcome when they'd clearly pay off:
@@ -46,14 +46,15 @@
   don't add new macOS-specific features.
 
 ## Project context
-- Gaze mapping today is a 2D polynomial fit. The roadmap goes straight to a CNN
-  (eye image in, gaze point out); there is no 3D-model step. Don't suggest
-  polynomial tuning (degree, grid size), since it has been shown not to help.
-  Current focus is data collection whose sessions stay usable across rig changes.
+- Roadmap: 2D polynomial fit → CNN (eye image in, gaze point out); there is no
+  3D-model step. Don't suggest polynomial tuning (degree, grid size), since it has
+  been shown not to help.
+- Recorded sessions must stay usable across rig changes (cameras, mounts, frame
+  rates), so they carry their own calibration metadata.
 - Eye cam: Arducam OV9281 (`0x0c45:0x6366`, serial UC762; that VID:PID is shared
   with the retired Sonix cam). Scene cam: `0x0bda:0xd565`.
 - Solo project since 2026-05-23; earlier commits may be from the prior
   contributors listed in the README.
-- `TODO.md` is the running backlog. Where things are documented:
-  `docs/dataset_format.md` (on-disk format), `3d-files/README.md` (mounts + jig),
-  `3d-files/MEASUREMENTS.md` (hardware dimensions).
+- Where things are documented: `docs/dataset_format.md` (on-disk format),
+  `3d-files/README.md` (mounts + jig), `3d-files/MEASUREMENTS.md` (hardware
+  dimensions).
