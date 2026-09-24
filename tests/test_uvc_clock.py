@@ -81,8 +81,24 @@ def test_nonsense_rate_rejected():
     assert not clock.ready
 
 
+def test_stalled_metadata_does_not_block():
+    import threading
+    import time
+    ts = UvcTimestamper("/dev/null")
+    ts._running = True                       # pretend the reader thread is up
+    ts._thread = threading.Thread(target=time.sleep, args=(5,), daemon=True)
+    ts._thread.start()
+    for _ in range(5):                       # first misses wait the timeout...
+        assert ts.lookup(1.0, timeout_s=0.02) is None
+    t0 = time.monotonic()
+    for _ in range(20):                      # ...then stop waiting
+        assert ts.lookup(1.0, timeout_s=0.02) is None
+    assert time.monotonic() - t0 < 0.05
+
+
 if __name__ == "__main__":
     test_recovers_pts_host_time_across_wrap()
     test_recovers_after_clock_jump()
     test_nonsense_rate_rejected()
+    test_stalled_metadata_does_not_block()
     print("ok")

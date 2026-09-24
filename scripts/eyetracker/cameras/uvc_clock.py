@@ -147,6 +147,10 @@ class UvcTimestamper:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self.error: Optional[str] = None
+        # Consecutive lookups that found no metadata. Past a few, stop waiting
+        # (the metadata stream has stalled) so the grabber isn't slowed to
+        # 1/timeout fps; one hit restores normal waiting.
+        self._misses = 0
 
     def start(self) -> None:
         self._reader.open()
@@ -213,12 +217,15 @@ class UvcTimestamper:
     def lookup(self, buf_ts_s: float, timeout_s: float = 0.05) -> Optional[float]:
         """Camera-clock time (host monotonic s) of the video frame whose V4L2
         timestamp is buf_ts_s, or None (no metadata for it / clock not fitted)."""
+        if not self.alive:
+            return None
         key = int(round(buf_ts_s * 1e6))
+        wait = timeout_s if self._misses < 5 else 0.0
         with self._cond:
-            if not self._cond.wait_for(lambda: key in self._pending or not self._running,
-                                       timeout=timeout_s):
-                return None
+            self._cond.wait_for(lambda: key in self._pending or not self._running,
+                                timeout=wait)
             hit = self._pending.pop(key, None)
+        self._misses = 0 if hit is not None else self._misses + 1
         if hit is None or not self.clock.ready:
             return None
         return self.clock.to_host(hit[0])

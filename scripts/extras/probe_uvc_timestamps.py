@@ -11,8 +11,10 @@ timestamps it records (CameraSource.last_timestamp / last_timestamp_source):
 - gaps: frames missing between consecutive timestamps (drops, or a consumer
   that fell behind the newest-frame handoff)
 - latency: time.monotonic() when the App received the frame minus its
-  timestamp (transfer + MJPG decode + handoff), and whether it trends: a
-  trend means the timestamps drift against the host clock
+  timestamp (transfer + MJPG decode + handoff), and whether it trends. Real
+  timestamp drift shows as hundreds-thousands of ppm (the kernel conversion:
+  ~2600); tens of ppm on short runs is beating between the frame rate and the
+  read loop (use --seconds 30+ to average it out)
 
 Rig findings (2026-09-23, uvcvideo nodrop=1 hwtimestamps=0, uvc_pts): see the
 commit adding uvc_clock.py. With the kernel's own conversion (hwtimestamps=1)
