@@ -48,15 +48,17 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       reports a free-running SOF counter in SCR (~1003/s), which the 5.15
       driver trusts, so its stamps drifted ~2600 ppm and jumped >100 ms.
       Kernel 6.8+ has a quirk for this class of camera.
-- [ ] Measure each camera's fixed PTS-to-exposure offset: rerun
-      `scripts/extras/flash_sync_test.py` on the userspace timestamps and
-      record the eye - scene offset + per-camera latency vs flip. Both cams'
-      PTS mark the start of sending a frame (~0.06-0.3 ms before its first USB
-      packet), i.e. after exposure + readout + encode. Same test gives display
-      flip latency.
+- [x] Eye - scene timestamp offset (flash test, 5 runs): 4.8 ms, +/-0.3 ms
+      run to run, ~+/-2 ms systematic (edge-dependent). Pair frames by light
+      with `eye_frame_ts - 0.0048`. Details: `docs/timestamping.md`. Rerun if
+      exposure settings or cameras change.
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
-- [ ] `nodrop=1` also delivers video frames uvcvideo flags as corrupt (none seen
-      so far); guard against truncated MJPEG frames if they show up
+- [ ] Reject corrupt MJPEG frames in the App. `nodrop=1` lets uvcvideo deliver
+      frames it flags as corrupt: 3 in one handheld flash run (cables moving),
+      0 in 2 min stationary (15,662 frames). A raw-bytes EOI check
+      (`CAP_PROP_CONVERT_RGB=0` + `cv2.imdecode`) only catches truncation;
+      catching mid-frame loss needs a strict decoder (libturbojpeg +
+      PyTurboJPEG, `TJFLAG_STOPONWARNING`).
 - [ ] Record the full eye + scene streams with timestamps (not just
       calibration samples), e.g. extend `record.py` to log per-frame ts
 - [ ] Offline tool: align eye + scene + stimulus streams from logged timestamps

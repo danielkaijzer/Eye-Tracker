@@ -254,7 +254,11 @@ def _crossings(ts, b, events, on_s):
             continue
         win = np.where((ts > t - m) & (ts < t + m))[0]
         n = (b[win] - lo) / (hi - lo)        # 0 before the edge, 1 after
-        k = next((i for i in range(1, len(n)) if n[i - 1] < 0.5 <= n[i]), None)
+        # The crossing must hold for the next frame too, so a single corrupt
+        # frame (uvcvideo nodrop=1 delivers truncated MJPEG ~1/min) mid-
+        # plateau isn't taken for the edge.
+        k = next((i for i in range(1, len(n) - 1)
+                  if n[i - 1] < 0.5 <= n[i] and n[i + 1] >= 0.5), None)
         if k is None:
             out.append(np.nan)
             continue
