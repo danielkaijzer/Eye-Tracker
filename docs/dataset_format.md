@@ -73,7 +73,7 @@ images), so their `fixation_id` is unreliable there. Richer per-frame fields
 (ellipse params, pye3d 3D vectors, normalized-image paths) from
 `docs/data_collection.md` are added as the pipeline starts producing them.
 
-### `rig_calibrations/<rig_id>.json` — camera-rig calibration
+### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
 Written by `scripts/extras/calibrate_extrinsics.py` from a jig capture. Sessions don't
 reference it yet: `rig_calibration_id` and `extrinsics` in `metadata.json` are still
 null (see `TODO.md`).

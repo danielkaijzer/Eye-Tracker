@@ -84,7 +84,9 @@ runs moved gaze by ~900 px.
       after `timestamping` merges, since both change `persistence.py`
 - [ ] After `timestamping` merges: move `_eye_cam_settings` /
       `_scene_cam_settings` out of `__main__.py` into a shared module (the
-      calibration scripts import them from `__main__` for now)
+      calibration scripts import them from `__main__` for now), and drop
+      "(planned)" from the `rig_calibrations` heading in `docs/dataset_format.md`
+      (left alone here to avoid a merge conflict)
 - [ ] Multi-pose coverage at steep head angles: live marker count as pose
       guidance, then more border markers so any 4 well-spread ones work
       (`TODO_multipose_coverage.md`)
