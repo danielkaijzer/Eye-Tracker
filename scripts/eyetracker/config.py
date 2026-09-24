@@ -7,8 +7,12 @@ import math
 
 
 # ---- Eye camera --------------------------------------------------------------
-# 0.3 MP (640x480) with 80° lens. If the spec turns out to be diagonal FOV
-# rather than horizontal, EYE_CAM_FOV_IS_DIAGONAL controls the focal-length math.
+# STALE: 640x480 / 80° diagonal are specs of the retired Sonix GC0308, not the
+# Arducam OV9281 (its lens is ~70° horizontal, 3d-files/MEASUREMENTS.md). The eye
+# cam is opened at its default mode, not this resolution, yet these values set
+# pye3d's focal length and are written to every session's metadata.json.
+# See TODO.md (Capture architecture). EYE_CAM_FOV_IS_DIAGONAL controls the
+# focal-length math.
 EYE_CAM_RESOLUTION = (640, 480)
 EYE_CAM_FOV_DEG = 80.0
 EYE_CAM_FOV_IS_DIAGONAL = True
@@ -44,17 +48,18 @@ EYE_UVC_ID = "0x0c45:0x6366"
 SCENE_REQUEST_WIDTH = 1920
 SCENE_REQUEST_HEIGHT = 1080
 
-# USB vendor:product for the uvc-util exposure path (Realtek OV5640). The scene
-# cam is manual-only and `exposure-time-abs` genuinely drives sensor integration
-# time (range 1-10000). SCENE_EXPOSURE is the initial value applied at startup;
-# None leaves the device default.
+# USB vendor:product of the scene cam (Realtek OV5640): picks it on Linux and
+# selects it for exposure control. The scene cam is manual-only and
+# `exposure-time-abs` genuinely drives sensor integration time (range 1-10000).
+# SCENE_EXPOSURE is the initial value applied at startup; None leaves the
+# device default.
 SCENE_UVC_ID = "0x0bda:0xd565"
 SCENE_EXPOSURE = None
 
 
 # ---- Exposure controls -------------------------------------------------------
-# OpenCV/AVFoundation can't set exposure on macOS, so we shell out to uvc-util
-# (jtfrey/uvc-util), selecting the scene cam by SCENE_UVC_ID above. Build it and
+# Linux goes through v4l2-ctl (cameras/v4l2.py). On macOS OpenCV/AVFoundation
+# can't set exposure, so we shell out to uvc-util (jtfrey/uvc-util): build it and
 # put it on PATH or set UVC_UTIL_PATH (see requirements.txt).
 #
 # Two nudge sizes for the '[' / ']' (fine) and '{' / '}' (coarse) hotkeys, each
@@ -159,8 +164,9 @@ CALIB_POSE_GUIDANCE = (
 
 # Validation capture ('v'): runs the detailed grid but fits nothing and leaves
 # the live calibration untouched — it saves a session tagged phase="validation"
-# whose held-out (pupil, scene-label) pairs measure_gaze_accuracy.py reads via --val. Run it at a steep head
-# angle to probe accuracy outside the calibrated region.
+# whose held-out (pupil, scene-label) pairs measure_gaze_accuracy.py reads via
+# --val. Run it at a steep head angle to probe accuracy outside the calibrated
+# region.
 CALIB_VALIDATION_DEGREE = 3
 
 

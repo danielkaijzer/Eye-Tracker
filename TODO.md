@@ -16,7 +16,7 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 - [x] Monitor at 100 Hz, persisted in `~/.config/monitors.xml`
 - [x] Headset-on quick calibration on the Jetson
 - [ ] Check the scene exposure hotkeys and `metadata.json` from a real session
-- [ ] Open PR
+- [x] Open PR (#37, merged)
 
 ## Capture architecture
 
@@ -34,6 +34,11 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       `EYE_CAM_RESOLUTION` accordingly.
       Note: the OV9281 has no 30 fps mode (MJPG is 100/120 only; YUYV 10 fps),
       so it already runs at 100 by default, on the Mac too.
+      Also: the eye cam is opened at its default mode, but `EYE_CAM_RESOLUTION`
+      / `EYE_CAM_FOV_DEG` (640x480, 80° diagonal) are Sonix-era values that set
+      pye3d's focal length and go into `metadata.json`. Request the eye mode
+      explicitly, record the real frame size, and use the OV9281's FOV (~70°
+      horizontal, or measured eye intrinsics once the jig exists).
 
 ## Timestamping + sync
 

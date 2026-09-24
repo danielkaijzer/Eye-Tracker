@@ -16,7 +16,7 @@ each dot's screen pixel into its location in the scene-camera image. For each do
 record one `(pupil_pixel, scene_pixel)` pair — pupil center from the eye camera,
 scene pixel from the homography. After the grid we least-squares-fit a degree-2 or
 degree-3 bivariate polynomial `pupil → scene` (`scripts/eyetracker/gaze/polynomial.py`).
-Two grids ship today: quick (`c`, 4×3, degree 2) and detailed (`d`, 5×4, degree 3,
+Two grids ship today: quick (`c`, 3×3, degree 2) and detailed (`d`, 5×4, degree 3,
 with worst-point recapture). Grid sizes, margins, and degrees live in
 `scripts/eyetracker/config.py` under `CALIB_QUICK_*` / `CALIB_DETAILED_*`.
 

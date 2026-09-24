@@ -29,7 +29,7 @@ Your user must be in the `video` group to open `/dev/video*`. Cameras are opened
 
 `requirements.txt` references `../pupil-detectors` as a local path relative to the repo root; adjust the clone location or edit the path if your layout differs. `pye3d` ships from PyPI (built from source on aarch64).
 
-**Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the laptop screen.
+**Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the calibration screen.
 
 ## Running
 
@@ -42,12 +42,15 @@ DISPLAY=:0 python -m scripts.eyetracker         # Linux, in the `et` env (DISPLA
 
 | Key | Action |
 | --- | --- |
-| `c` | Quick calibration (4×3 grid, degree-2 polynomial) |
+| `c` | Quick calibration (3×3 grid, degree-2 polynomial). During calibration: capture the current point, or start the next pose |
 | `d` | Detailed calibration (5×4 grid, degree-3 polynomial, with worst-point recapture) |
 | `m` | Multi-pose calibration (one grid per head pose, aggregated into one fit — widens field-of-view coverage; press `c` to start each pose) |
 | `v` | Validation capture (collect-only; writes a held-out session tagged `phase: validation` for accuracy measurement, leaves the live calibration untouched) |
 | `l` | Load most recent saved calibration |
 | `r` | Reset the pye3d 3D pupil model (give it ~30 s to reconverge) |
+| `s` / `Esc` | During calibration: skip the current point / abort its capture and retry |
+| `p`, `-` / `=` | During calibration: camera preview, marker brightness |
+| `[` / `]`, `{` / `}` | Scene exposure darker / brighter, fine / coarse |
 | `space` | Pause |
 | `q` | Quit |
 
@@ -67,7 +70,7 @@ scripts/eyetracker/         # Main Python package — `py -m scripts.eyetracker`
     scene/                  # ArUco detection and screen→scene homography
     gaze/                   # Polynomial mapper, 1€ smoother
     calibration/            # State machine, sample collector, persistence
-    dataset.py              # Load per-session labels into one frame (+ Parquet cache)
+    dataset.py              # Read recorded sessions (metadata.json + labels.csv)
     display/                # Tk calibration overlay, cv2 windows
 
 scripts/extras/             # Standalone utilities
@@ -85,15 +88,16 @@ experimental/               # Paused / on-hold work, kept for reference
 
 docs/                       # Implementation notes, citations, architecture
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
+    loo_error_notes.md              # Leave-one-out error: what it measures, past regression
     calibration_coverage.md         # The coverage problem + eccentricity validation tooling
     multipose_calibration.md        # Multi-pose calibration: widening FOV coverage
+    uvc_exposure_cheatsheet.md      # macOS uvc-util camera controls from the terminal
     data_collection.md              # Fields the data-collection pipeline captures
     dataset_format.md               # On-disk format for sessions + calibration artifacts
     citations/                      # references.bib + references.tex
-    architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
 
 data/                       # Recorded MP4s + per-session calibration dumps
-3d-files/                   # STLs for the headset mounts
+3d-files/                   # OpenSCAD camera mounts + calibration jig (see its README)
 requirements.txt            # Python deps (OpenCV, numpy, pupil-detectors)
 ```
 
