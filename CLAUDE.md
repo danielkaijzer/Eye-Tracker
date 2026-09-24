@@ -7,8 +7,11 @@
 
 ## Environment
 - Python env: conda env `et`. Tests: `python -m pytest tests`.
-- The rig runs on a Jetson Orin (Linux, V4L2). macOS still works for development;
-  macOS-only paths (uvc-util exposure control) are marked as such.
+- Linux (Jetson Orin, V4L2) is the research platform: data collection and
+  anything timing-sensitive. macOS is a best-effort live-demo mode (quick
+  calibration + live gaze). Research features may be Linux-only; keep macOS
+  code inside the existing `IS_LINUX` branches and `cameras/uvc_util.py`, and
+  don't add new macOS-specific features.
 
 ## Project context
 - Gaze mapping today is a 2D polynomial fit. The roadmap goes straight to a CNN

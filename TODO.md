@@ -86,7 +86,7 @@ runs moved gaze by ~900 px.
 
 ## Housekeeping
 
-- [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
-      `cameras/v4l2.py` enumeration instead of hardcoded indexes
-- [ ] Eye cam dropped off USB once with `UVC probe control: -71` (fixed by
-      replug). If it recurs under load, try a powered hub.
+- [ ] Eye cam resets / drops off USB often (~25x on 2026-09-23, incl.
+      `can't read configurations, error -71`), worse through passive USB
+      extension cables. Try a powered hub near the headset / short or active
+      cables. Capture code should also survive a reset (reopen by USB id).
