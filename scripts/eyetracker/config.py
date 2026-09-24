@@ -7,12 +7,14 @@ import math
 
 
 # ---- Eye camera --------------------------------------------------------------
-# STALE: 640x480 / 80° diagonal are specs of the retired Sonix GC0308, not the
-# Arducam OV9281 (its lens is ~70° horizontal, 3d-files/MEASUREMENTS.md). The eye
-# cam is opened at its default mode, not this resolution, yet these values set
-# pye3d's focal length and are written to every session's metadata.json.
-# See TODO.md (Capture architecture). EYE_CAM_FOV_IS_DIAGONAL controls the
-# focal-length math.
+# Eye frames are center-cropped to 4:3 and resized to EYE_CAM_RESOLUTION
+# (cameras/utils.py) before pupil detection, so pupil coordinates and saved eye
+# images are 640x480 whatever mode the camera runs in.
+# STALE: EYE_CAM_FOV_DEG (80° diagonal) is the retired Sonix GC0308's lens. The
+# Arducam OV9281's lens is ~70° horizontal (3d-files/MEASUREMENTS.md), and the
+# effective FOV of the cropped frame depends on the camera's native mode. This
+# value sets pye3d's focal length and is written to metadata.json; see TODO.md
+# (Capture architecture). EYE_CAM_FOV_IS_DIAGONAL controls the focal-length math.
 EYE_CAM_RESOLUTION = (640, 480)
 EYE_CAM_FOV_DEG = 80.0
 EYE_CAM_FOV_IS_DIAGONAL = True
