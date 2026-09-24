@@ -1,18 +1,25 @@
-"""Capture ChArUco frames from the scene cam and solve for intrinsics.
+"""Capture ChArUco frames from the eye cam and solve for its intrinsics.
+
+Mirrors calibrate_scene_intrinsics.py for the eye camera. Frames go through the
+app's own eye-camera settings (mode, flip) and the same 4:3 crop + resize to
+640x480 (`cameras/utils.py`) before detection, so K matches the frames the
+pupil detector sees and the ones calibrate_extrinsics.py solves on.
+
+IMPORTANT: calibrate at the focus you'll use. Refocusing the M12 lens changes
+the intrinsics, so if you refocus the eye cam onto its jig board for
+calibrate_extrinsics.py, calibrate here at that same focus and don't touch the
+lens in between.
 
 Workflow:
-1. Run scripts/extras/generate_charuco_board.py and display its output
-   fullscreen on a screen the scene cam can see (second monitor is easiest).
-2. Run this script. Preview window shows the cam feed with detected markers
-   and ChArUco corners overlaid.
-3. Vary scene-cam pose (close/far, tilted, rotated, board near image corners).
-   Press SPACE on each pose to capture. Aim for 15+ captures across varied
-   distances and angles.
-4. Press C to compute calibration. Press R to clear captures. Q to quit.
+1. Print a board (`generate_charuco_board.py --board small`, laser printer: the
+   eye cam sees in IR, where some inkjet inks are nearly invisible).
+2. Run this script. The preview shows the feed with detections overlaid.
+3. Vary the board pose: close/far, tilted, rotated, near the image corners.
+   Press SPACE on each pose to capture. Aim for 15+ varied captures.
+4. Press C to compute. R to reset. Q to quit.
 
-Output: scripts/eyetracker/scene_intrinsics.json with K, dist, image_size,
-reproj_rms, timestamp. Use K[0][0] (fx) to convert pixel error to angular:
-    angular_deg = degrees(atan(pixel_err / fx))
+Output: scripts/eyetracker/eye_intrinsics.json with K, dist, image_size,
+reproj_rms, timestamp (same format as scene_intrinsics.json).
 """
 import argparse
 import json
@@ -22,19 +29,18 @@ import time
 
 import cv2
 
-from scripts.eyetracker.calibration.paths import scene_intrinsics_path
-from scripts.eyetracker.cameras.discovery import detect_cameras, eye_first, pick_scene_index
+from scripts.eyetracker.calibration.paths import eye_intrinsics_path
+from scripts.eyetracker.cameras.discovery import detect_cameras, eye_first
 from scripts.eyetracker.cameras.opencv_source import OpenCVCamera
-from scripts.eyetracker.config import EYE_UVC_ID, SCENE_UVC_ID
-from scripts.extras.charuco_boards import (
-    SCREEN_DICT_NAME, SCREEN_SQUARES_X, SCREEN_SQUARES_Y, build_screen_board,
-)
+from scripts.eyetracker.cameras.utils import crop_to_aspect_ratio
+from scripts.eyetracker.config import EYE_UVC_ID
+from scripts.extras.charuco_boards import PRINT_BOARDS, build_print_board, build_screen_board
 
 MIN_CORNERS_PER_FRAME = 8
 MIN_FRAMES_FOR_CALIBRATION = 10
 
-OUTPUT_PATH = scene_intrinsics_path()
-WINDOW_NAME = "calibrate_scene_intrinsics"
+OUTPUT_PATH = eye_intrinsics_path()
+WINDOW_NAME = "calibrate_eye_intrinsics"
 
 
 def _print_K_summary(K, image_size):
@@ -48,30 +54,34 @@ def _print_K_summary(K, image_size):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cam-index", type=int, default=None,
-                        help="OpenCV index of the scene cam (default: found by USB id "
-                             "on Linux, else the second camera)")
+                        help="OpenCV index of the eye cam (default: found by USB id "
+                             "on Linux, else the first camera)")
+    parser.add_argument("--board", default="small", choices=["screen", *PRINT_BOARDS],
+                        help="ChArUco board to detect (see generate_charuco_board.py)")
     parser.add_argument("--out", default=OUTPUT_PATH)
     args = parser.parse_args()
 
-    # The app's scene-camera settings, so K matches the frames the app uses.
-    from scripts.eyetracker.__main__ import _scene_cam_settings
+    # The app's eye-camera settings, so this calibrates the frames the app uses.
+    from scripts.eyetracker.__main__ import _eye_cam_settings
 
-    board = build_screen_board()
+    board = build_screen_board() if args.board == "screen" else build_print_board(args.board)
     detector = cv2.aruco.CharucoDetector(board)
 
     cam_index = args.cam_index
     if cam_index is None:
         cameras = eye_first(detect_cameras(), EYE_UVC_ID)
-        eye_index = cameras[0] if cameras else 0
-        cam_index = pick_scene_index(eye_index, cameras, SCENE_UVC_ID)
-    cam = OpenCVCamera(cam_index, _scene_cam_settings())
+        cam_index = cameras[0] if cameras else 0
+    cam = OpenCVCamera(cam_index, _eye_cam_settings())
     if not cam.open():
         sys.exit(f"Could not open camera at index {cam_index}")
 
-    print(f"Scene cam: {cam.width}x{cam.height}")
-    print(f"Board:     {SCREEN_SQUARES_X}x{SCREEN_SQUARES_Y} squares, {SCREEN_DICT_NAME}")
+    print(f"Eye cam {cam_index}: {cam.width}x{cam.height} native, "
+          f"calibrating the cropped/resized frames")
+    print(f"Board:   {args.board}")
     print()
     print("SPACE = capture | C = calibrate | R = reset | Q = quit")
     print("Vary pose: close/far, tilted, rotated, board near image corners.")
@@ -84,6 +94,7 @@ def main():
         frame = cam.read()
         if frame is None:
             continue
+        frame = crop_to_aspect_ratio(frame)
         if image_size is None:
             image_size = (frame.shape[1], frame.shape[0])
 
@@ -133,6 +144,7 @@ def main():
                     "image_width": image_size[0],
                     "image_height": image_size[1],
                     "reproj_rms": float(rms),
+                    "board": args.board,
                     "timestamp": time.time(),
                 }, f, indent=2)
             print(f"  saved -> {args.out}")

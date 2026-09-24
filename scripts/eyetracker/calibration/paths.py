@@ -1,7 +1,7 @@
 """Filesystem locations for calibration artifacts.
 
 The live mapper model lives in `calibration.json` at the package root, next to
-the scene-cam intrinsics (`scene_intrinsics.json`). Per-session data — eye/scene
+the camera intrinsics (`scene_intrinsics.json`, `eye_intrinsics.json`). Per-session data — eye/scene
 frames, `labels.csv`, and `metadata.json` — lives under
 `<repo>/data/calibration/session_<timestamp>/`. Camera-rig calibrations produced
 by the extrinsics jig live under `<repo>/rig_calibrations/`.
@@ -21,6 +21,12 @@ def calibration_path() -> str:
 def scene_intrinsics_path() -> str:
     """Scene-cam intrinsics (K, distortion) produced by the intrinsics tool."""
     return os.path.join(_PACKAGE_DIR, "scene_intrinsics.json")
+
+
+def eye_intrinsics_path() -> str:
+    """Eye-cam intrinsics (K, distortion) from calibrate_eye_intrinsics.py, in
+    the app's processed eye-frame geometry (cropped + resized)."""
+    return os.path.join(_PACKAGE_DIR, "eye_intrinsics.json")
 
 
 def dataset_root() -> str:
