@@ -74,6 +74,10 @@ useful part. Entries marked *unverified* haven't been confirmed on the rig.
   (on branch `timestamping`)
 - 2026-09 · Without a grabber thread, V4L2 hands back the oldest queued frame: eye
   frames were 130–275 ms stale on the Jetson. → `cameras/opencv_source.py`
+- 2026-09-24 · **Decision:** no streaming the rig's video to another machine for
+  calibration or display for now. Calibration-dot onsets would then happen on a
+  different machine's clock, bringing back the cross-machine sync problem.
+  (`linux_cam_stream.py` removed; it's in git history.)
 - 2026-09 · **Decision:** research capture runs on Linux. On macOS, raw UVC
   timestamps need root and exclusive device access, which rules out OpenCV
   capture. macOS stays a live-demo mode. → `README.md` (Platforms)
@@ -97,6 +101,9 @@ useful part. Entries marked *unverified* haven't been confirmed on the rig.
   vertical (~72 mm baseline), on the old mounts. Re-measure before relying on them.
 
 ## Data
+
+- 2026-09-24 · **Decision:** no frontend until the tracking fundamentals work. The
+  paused Next.js dashboard and its tools were removed (they're in git history).
 
 - 2026-09-24 · The pre-migration calibration history (27 Sonix-era sessions, 352
   pupil/target pairs, no images) is kept only on the Mac at `data/legacy/`, not in
