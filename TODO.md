@@ -59,8 +59,6 @@ Steps 3 and 4 can share one session at the rig.
 Remaining error is physical (depth parallax + headset slip), not the
 calibration code: see the 2026-09-23 entry in `docs/findings.md`.
 
-- [x] Scene-cam intrinsics (`scene_intrinsics.json`, 2026-05-04, 0.32 px RMS);
-      recalibrate with `calibrate_scene_intrinsics.py` if the lens focus changes
 - [ ] Undistorted homography (`use-intrinsics-for-homography`): on the rig, run
       one calibration with and one without `scene_intrinsics.json` and compare
       the `ArUco check` err near the frame edges, then merge. The loader doesn't
