@@ -5,10 +5,11 @@
     monitor is the cleanest setup), then run calibrate_scene_intrinsics.py.
     Output: scripts/extras/charuco_board.png (configurable via --out).
 
---board small | medium | large | print
+--board tiny | small | medium | large | print
     Exact-size US Letter PDFs for the dual-camera calibration jig ("print"
-    makes all three). Print all sizes and check which one each camera detects
-    reliably at the real working distance before mounting them on the jig.
+    makes all of them). "tiny" (5 mm squares) is for the eye cam at eye
+    distance; for the scene cam, print the others and check which it detects
+    reliably at the real working distance before mounting it on the jig.
     Output: scripts/extras/charuco_print/charuco_<size>.pdf (--out is the folder).
     Needs reportlab (`pip install reportlab`).
 

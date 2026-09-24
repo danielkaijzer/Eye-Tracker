@@ -19,8 +19,9 @@ The eye↔scene extrinsics jig isn't 3D printed. It's three stainless steel shee
 roughly 90° with L brackets, with printed ChArUco boards pasted on
 (`scripts/extras/generate_charuco_board.py --board print`) so the eye cam and the scene cam
 each see a board on a different sheet. The angles don't need to be exact: the extrinsics
-solver only needs the jig to be rigid. An earlier 3D-printed design was never built; it's
-in git history.
+solver only needs the jig to be rigid (`scripts/extras/calibrate_extrinsics.py`; its
+docstring has the capture workflow). An earlier 3D-printed design was never built; it's in
+git history.
 
 ## Archive
 

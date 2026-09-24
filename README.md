@@ -82,6 +82,8 @@ scripts/eyetracker/         # Main Python package — `python -m scripts.eyetrac
 
 scripts/extras/             # Standalone utilities
     calibrate_scene_intrinsics.py   # ChArUco intrinsics for the scene camera
+    calibrate_eye_intrinsics.py     # ChArUco intrinsics for the eye camera (app frame geometry)
+    calibrate_extrinsics.py         # Eye↔scene transform from the calibration jig (hand-eye solve)
     generate_charuco_board.py       # Screen board PNG for the above; printable jig boards (PDF)
     charuco_boards.py               # Board specs shared by the generator and calibration scripts
     measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions

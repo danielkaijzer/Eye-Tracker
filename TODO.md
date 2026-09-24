@@ -72,22 +72,22 @@ runs moved gaze by ~900 px.
         corners let it be backfilled for every session once intrinsics exist.
       - Per sample, not per fixation, so head motion during capture shows up
       - Update `docs/dataset_format.md` + a test
-- [ ] Eye↔scene extrinsics: the jig is built (three steel sheets at ~90°; board
-      sizes not chosen yet). Port `calibrate_extrinsics.py` /
-      `calibrate_eye_intrinsics.py` from `claude/calibration-jig-review` (keep
-      that branch until then). Fixes needed when porting:
-      - Eye frames must match the app's geometry: same eye mode + the 4:3
-        crop/resize to 640x480 (`cameras/utils.py`) and `EYE_CAM_FLIP_VERTICAL`.
-        As written, intrinsics request 640x480 with no crop while extrinsics
-        use the default mode, so K wouldn't match. Pin the eye mode first
-        (see the FOV item above).
-      - Extrinsics must open the scene cam at 1920x1080 like the app; it uses
-        the default mode, which may not match `scene_intrinsics.json`
-      - Read/write JSON (`scene_intrinsics.json`; output to
-        `rig_calibrations/<rig_id>.json` per `docs/dataset_format.md`) instead
-        of `.npz`, and build boards from `scripts/extras/charuco_boards.py`
-      - Then have sessions reference/inline the rig calibration in
-        `metadata.json` (currently null)
+- [x] Port the jig calibration scripts (`calibrate_eye_intrinsics.py`,
+      `calibrate_extrinsics.py`): app frame geometry, JSON in/out, shared board
+      specs, synthetic solve test (`tests/test_extrinsics_solve.py`)
+- [ ] Eye↔scene extrinsics on the rig. Pin the eye mode first (FOV item above):
+      eye intrinsics only hold for one native mode + crop. Laser-print the
+      `tiny` board for the eye side (sized for eye distance, no refocus) and
+      pick a scene-side size, paste them on the jig, then run
+      `calibrate_eye_intrinsics.py` and `calibrate_extrinsics.py`
+- [ ] Sessions reference the rig calibration in `metadata.json`
+      (`rig_calibration_id`, `extrinsics`, eye intrinsics; all null today). Do it
+      after `timestamping` merges, since both change `persistence.py`
+- [ ] After `timestamping` merges: move `_eye_cam_settings` /
+      `_scene_cam_settings` out of `__main__.py` into a shared module (the
+      calibration scripts import them from `__main__` for now), and drop
+      "(planned)" from the `rig_calibrations` heading in `docs/dataset_format.md`
+      (left alone here to avoid a merge conflict)
 - [ ] Multi-pose coverage at steep head angles: live marker count as pose
       guidance, then more border markers so any 4 well-spread ones work
       (`TODO_multipose_coverage.md`)

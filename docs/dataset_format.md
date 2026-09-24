@@ -18,8 +18,9 @@ data/calibration/
 scripts/eyetracker/
   calibration.json           # live polynomial model restored at runtime
   scene_intrinsics.json      # scene-cam intrinsics (K, dist)
+  eye_intrinsics.json        # eye-cam intrinsics, in the app's cropped 640x480 frames
 rig_calibrations/
-  <rig_id>.json              # produced by the extrinsics jig
+  <rig_id>.json              # written by scripts/extras/calibrate_extrinsics.py
 ```
 
 ## Artifacts
@@ -73,14 +74,27 @@ images), so their `fixation_id` is unreliable there. Richer per-frame fields
 `docs/data_collection.md` are added as the pipeline starts producing them.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
-Produced by the extrinsics calibration (the jig is built; the solver isn't ported yet, see `TODO.md`). Schema is defined now; sessions
-will reference it via `rig_calibration_id` and inline its values into `metadata.json`:
+Written by `scripts/extras/calibrate_extrinsics.py` from a jig capture. Sessions don't
+reference it yet: `rig_calibration_id` and `extrinsics` in `metadata.json` are still
+null (see `TODO.md`).
 
 ```json
 { "rig_id": "<ts>", "created_at": "<iso>", "notes": null,
-  "intrinsics": { "eye": {"K":[[...]],"dist":[...]}, "scene": {"K":[[...]],"dist":[...]} },
-  "extrinsics_eye_to_scene": { "R": [[...]], "t": [...], "method": null, "reproj_err": null } }
+  "intrinsics": {
+    "eye":   { "K": [[...]], "dist": [...], "image_width": 640, "image_height": 480,
+               "reproj_rms": r, "source": "eye_intrinsics.json" },
+    "scene": { ...same keys... } },
+  "extrinsics_eye_to_scene": {
+    "R": [[...]], "t": [...], "units": "mm", "method": "calibrateRobotWorldHandEye/SHAH",
+    "residual_rot_deg": { "mean": x, "max": x }, "residual_trans_mm": { "mean": x, "max": x } },
+  "capture": { "n_pairs": n, "pose_diversity_deg": x, "eye_board": "small",
+               "scene_board": "large", "board_b_to_a": { "R": [[...]], "t": [...] } } }
 ```
+
+`extrinsics_eye_to_scene` maps eye-cam coordinates to scene-cam coordinates:
+`p_scene = R @ p_eye + t`, in mm. The intrinsics are copied in so the record is
+self-contained; the eye intrinsics describe the app's processed eye frames (4:3 crop,
+resized to 640x480), not the camera's native mode.
 
 ## Loading for analysis / training
 
