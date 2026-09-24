@@ -25,25 +25,15 @@ import cv2
 from scripts.eyetracker.calibration.paths import scene_intrinsics_path
 from scripts.eyetracker.cameras.opencv_source import CameraSettings, OpenCVCamera
 from scripts.eyetracker.config import SCENE_REQUEST_HEIGHT, SCENE_REQUEST_WIDTH
-
-DICT_NAME = "DICT_5X5_100"
-SQUARES_X = 10
-SQUARES_Y = 7
-SQUARE_LEN = 1.0
-MARKER_LEN = 0.75
+from scripts.extras.charuco_boards import (
+    SCREEN_DICT_NAME, SCREEN_SQUARES_X, SCREEN_SQUARES_Y, build_screen_board,
+)
 
 MIN_CORNERS_PER_FRAME = 8
 MIN_FRAMES_FOR_CALIBRATION = 10
 
 OUTPUT_PATH = scene_intrinsics_path()
 WINDOW_NAME = "calibrate_scene_intrinsics"
-
-
-def _build_board():
-    dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, DICT_NAME))
-    return cv2.aruco.CharucoBoard(
-        (SQUARES_X, SQUARES_Y), SQUARE_LEN, MARKER_LEN, dictionary,
-    )
 
 
 def _print_K_summary(K, image_size):
@@ -63,7 +53,7 @@ def main():
     parser.add_argument("--out", default=OUTPUT_PATH)
     args = parser.parse_args()
 
-    board = _build_board()
+    board = build_screen_board()
     detector = cv2.aruco.CharucoDetector(board)
 
     cam = OpenCVCamera(args.cam_index, CameraSettings(
@@ -74,7 +64,7 @@ def main():
         sys.exit(f"Could not open camera at index {args.cam_index}")
 
     print(f"Scene cam: {cam.width}x{cam.height}")
-    print(f"Board:     {SQUARES_X}x{SQUARES_Y} squares, {DICT_NAME}")
+    print(f"Board:     {SCREEN_SQUARES_X}x{SCREEN_SQUARES_Y} squares, {SCREEN_DICT_NAME}")
     print()
     print("SPACE = capture | C = calibrate | R = reset | Q = quit")
     print("Vary pose: close/far, tilted, rotated, board near image corners.")

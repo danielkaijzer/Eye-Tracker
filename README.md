@@ -74,7 +74,8 @@ scripts/extras/             # Standalone utilities
     record.py                       # Sync-recorded eye + scene MP4s
     analyze_recordings.py           # Per-file stats on a recording dir
     calibrate_scene_intrinsics.py   # ChArUco intrinsics for the scene camera
-    generate_charuco_board.py       # Prints the board PNG used above
+    generate_charuco_board.py       # Screen board PNG for the above; printable jig boards (PDF)
+    charuco_boards.py               # Board specs shared by the generator and calibration scripts
     gaze_emulator.py                # Synthetic gaze stream for dashboard dev
     measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions
     heatmap.py, camera_test.py, linux_cam_stream.py
