@@ -158,8 +158,8 @@ CALIB_POSE_GUIDANCE = (
 )
 
 # Validation capture ('v'): runs the detailed grid but fits nothing and leaves
-# the live calibration untouched — it dumps held-out (pupil, scene-label) pairs
-# to validation_*.npz for measure_gaze_accuracy.py. Run it at a steep head
+# the live calibration untouched — it saves a session tagged phase="validation"
+# whose held-out (pupil, scene-label) pairs measure_gaze_accuracy.py reads via --val. Run it at a steep head
 # angle to probe accuracy outside the calibrated region.
 CALIB_VALIDATION_DEGREE = 3
 

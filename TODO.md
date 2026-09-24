@@ -66,6 +66,10 @@ runs moved gaze by ~900 px.
         corners let it be backfilled for every session once intrinsics exist.
       - Per sample, not per fixation, so head motion during capture shows up
       - Update `docs/dataset_format.md` + a test
+- [ ] Eye↔scene extrinsics: print + assemble the jig (`3d-files/calibration-jig/`),
+      then port `calibrate_extrinsics.py` / `calibrate_eye_intrinsics.py` from
+      `claude/calibration-jig-review` (switch them to JSON output and the shared
+      board specs in `scripts/extras/charuco_boards.py`)
 - [ ] Parallax model: calibrate at 2+ depths, use the eye-to-scene offset to
       correct gaze for a given depth (needs a runtime depth source: assumed,
       scene depth, or vergence from a second eye cam)

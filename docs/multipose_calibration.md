@@ -114,9 +114,9 @@ Multi-pose is exactly the kind of change that needs the
 confirm — "feels better" isn't measurable. End-to-end:
 
 1. Capture a held-out wide-angle set once with `v` (steep head angle). Keep this
-   `validation_<ts>.npz` fixed so it's a fair yardstick across runs.
+   validation session fixed so it's a fair yardstick across runs.
 2. Measure your **current head-on** calibration against it:
-   `python -m scripts.extras.measure_gaze_accuracy --val scripts/eyetracker/validation_*.npz`
+   `python -m scripts.extras.measure_gaze_accuracy --val data/calibration/session_<validation ts>`
    — expect large error in the outer eccentricity bins (the gap).
 3. Recalibrate with `m` across all poses (don't touch the headset), confirming LOO stays
    under the usable threshold (`0.04 × scene_width`).

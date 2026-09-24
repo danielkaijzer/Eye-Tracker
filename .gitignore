@@ -5,7 +5,6 @@ GEMINI.md
 # Live calibration model the app writes at runtime (calibration/paths.py)
 scripts/eyetracker/calibration.json
 .docs/
-Claude.md
 
 # Cache stuff
 .vscode
