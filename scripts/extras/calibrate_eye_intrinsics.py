@@ -5,14 +5,14 @@ app's own eye-camera settings (mode, flip) and the same 4:3 crop + resize to
 640x480 (`cameras/utils.py`) before detection, so K matches the frames the
 pupil detector sees and the ones calibrate_extrinsics.py solves on.
 
-IMPORTANT: calibrate at the focus you'll use. Refocusing the M12 lens changes
-the intrinsics, so if you refocus the eye cam onto its jig board for
-calibrate_extrinsics.py, calibrate here at that same focus and don't touch the
-lens in between.
+IMPORTANT: calibrate at the eye focus the app uses. Refocusing the M12 lens
+changes the intrinsics. The "tiny" board is sized for the eye's working
+distance (~45-50 mm), so neither this nor calibrate_extrinsics.py needs a
+refocus.
 
 Workflow:
-1. Print a board (`generate_charuco_board.py --board small`, laser printer: the
-   eye cam sees in IR, where some inkjet inks are nearly invisible).
+1. Print the tiny board (`generate_charuco_board.py --board tiny`, on a laser
+   printer: the eye cam sees in IR, where some inkjet inks are nearly invisible).
 2. Run this script. The preview shows the feed with detections overlaid.
 3. Vary the board pose: close/far, tilted, rotated, near the image corners.
    Press SPACE on each pose to capture. Aim for 15+ varied captures.
@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--cam-index", type=int, default=None,
                         help="OpenCV index of the eye cam (default: found by USB id "
                              "on Linux, else the first camera)")
-    parser.add_argument("--board", default="small", choices=["screen", *PRINT_BOARDS],
+    parser.add_argument("--board", default="tiny", choices=["screen", *PRINT_BOARDS],
                         help="ChArUco board to detect (see generate_charuco_board.py)")
     parser.add_argument("--out", default=OUTPUT_PATH)
     args = parser.parse_args()

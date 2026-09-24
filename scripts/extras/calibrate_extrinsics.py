@@ -34,9 +34,9 @@ FRAME GEOMETRY
   refuses to run if their image sizes don't match the live frames.
 
 WORKFLOW
-  1. Calibrate eye intrinsics at the focus you'll use here. If you refocus the
-     eye cam onto its board, don't touch the lens between the two steps.
-  2. Place the headset so the eye cam sees one board and the scene cam another.
+  1. Calibrate eye intrinsics (calibrate_eye_intrinsics.py) at the eye focus.
+  2. Place the headset so the eye cam sees the tiny board at about eye distance
+     (~45-50 mm, no refocus) and the scene cam sees a board on another sheet.
   3. Run this script. Both feeds show with detections overlaid. SPACE captures a
      pair (only when BOTH boards are detected). Hold still for each capture.
      Between captures, ROTATE the headset about different axes, not just slide
@@ -275,7 +275,7 @@ def main():
                         help="default: found by USB id on Linux, else the next camera")
     parser.add_argument("--eye-intrinsics", default=eye_intrinsics_path())
     parser.add_argument("--scene-intrinsics", default=scene_intrinsics_path())
-    parser.add_argument("--eye-board", default="small", choices=list(PRINT_BOARDS),
+    parser.add_argument("--eye-board", default="tiny", choices=list(PRINT_BOARDS),
                         help="ChArUco preset on the sheet the EYE cam sees")
     parser.add_argument("--scene-board", default="large", choices=list(PRINT_BOARDS),
                         help="ChArUco preset on the sheet the SCENE cam sees")

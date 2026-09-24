@@ -76,9 +76,10 @@ runs moved gaze by ~900 px.
       `calibrate_extrinsics.py`): app frame geometry, JSON in/out, shared board
       specs, synthetic solve test (`tests/test_extrinsics_solve.py`)
 - [ ] Eye↔scene extrinsics on the rig. Pin the eye mode first (FOV item above):
-      eye intrinsics only hold for one native mode + crop. Pick board sizes
-      (laser print, check them through the eye cam), paste them on the jig, then
-      run `calibrate_eye_intrinsics.py` and `calibrate_extrinsics.py`
+      eye intrinsics only hold for one native mode + crop. Laser-print the
+      `tiny` board for the eye side (sized for eye distance, no refocus) and
+      pick a scene-side size, paste them on the jig, then run
+      `calibrate_eye_intrinsics.py` and `calibrate_extrinsics.py`
 - [ ] Sessions reference the rig calibration in `metadata.json`
       (`rig_calibration_id`, `extrinsics`, eye intrinsics; all null today). Do it
       after `timestamping` merges, since both change `persistence.py`
