@@ -52,8 +52,8 @@ at the calibration depth (scene cam sits a few cm from the eye), and the
 pupil-only mapping is very slip-sensitive: a ~40 px pupil shift between two
 runs moved gaze by ~900 px.
 
-- [ ] Scene-cam intrinsics (`scripts/extras/calibrate_scene_intrinsics.py`);
-      also unlocks degree-based accuracy in `measure_gaze_accuracy.py`
+- [x] Scene-cam intrinsics (`scene_intrinsics.json`, 2026-05-04, 0.32 px RMS);
+      recalibrate with `calibrate_scene_intrinsics.py` if the lens focus changes
 - [ ] Undistorted homography (`use-intrinsics-for-homography`): on the rig, run
       one calibration with and one without `scene_intrinsics.json` and compare
       the `ArUco check` err near the frame edges, then merge. The loader doesn't
