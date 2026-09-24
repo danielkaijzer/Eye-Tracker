@@ -89,6 +89,7 @@ scripts/extras/             # Standalone utilities
     measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions
 
 docs/                       # Implementation notes, citations, architecture
+    findings.md                     # What we've measured, decided, or learned (dated)
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
     loo_error_notes.md              # Leave-one-out error: what it measures, past regression
     calibration_coverage.md         # The coverage problem + eccentricity validation tooling
