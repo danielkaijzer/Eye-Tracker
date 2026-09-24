@@ -102,11 +102,14 @@ useful part. Entries marked *unverified* haven't been confirmed on the rig.
 
 ## Data
 
-- 2026-09-24 · **Decision:** no frontend until the tracking fundamentals work. The
-  paused Next.js dashboard and its tools were removed (they're in git history).
 
 - 2026-09-24 · The pre-migration calibration history (27 Sonix-era sessions, 352
   pupil/target pairs, no images) is kept only on the Mac at `data/legacy/`, not in
   git.
 - 2026-06-06 · Persistence moved off `.npz` to JSON + CSV (`calibration.json`,
   per-session `metadata.json` + `labels.csv`). → `docs/dataset_format.md`
+
+## Scope
+
+- 2026-09-24 · **Decision:** no frontend until the tracking fundamentals work. The
+  paused Next.js dashboard and its tools were removed (they're in git history).
