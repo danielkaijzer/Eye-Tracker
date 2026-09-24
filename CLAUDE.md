@@ -1,7 +1,8 @@
 # Claude Guidelines
 
 ## Git & Version Control
-- Always check with me before committing or pushing. Proposing it is fine (suggest the commit and message, then ask), but don't run it until I say yes.
+- Use your judgment on committing and pushing to feature branches once a change is complete and verified; ask if unsure.
+- Always ask before pushing to `main`, force-pushing, rewriting pushed history, or deleting branches. Merging PRs is mine.
 - **Never add attribution to commits or PRs**: no `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" line. I direct the work, so it's credited to me.
 
 ## Environment
