@@ -2,7 +2,7 @@
 
 Running backlog. Check items off as they land. Put the branch/PR next to an
 item while it's in flight. Detailed per-feature plans get their own
-`TODO_<topic>.md` (e.g. `TODO_calibration_ux.md`).
+`TODO_<topic>.md` (e.g. `TODO_multipose_coverage.md`).
 
 Rig: Jetson Orin (JetPack 6, Ubuntu 22.04) + Philips 221V8LB @ 1920x1080 100 Hz.
 Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
@@ -70,6 +70,9 @@ runs moved gaze by ~900 px.
       then port `calibrate_extrinsics.py` / `calibrate_eye_intrinsics.py` from
       `claude/calibration-jig-review` (switch them to JSON output and the shared
       board specs in `scripts/extras/charuco_boards.py`)
+- [ ] Multi-pose coverage at steep head angles: live marker count as pose
+      guidance, then more border markers so any 4 well-spread ones work
+      (`TODO_multipose_coverage.md`)
 - [ ] Parallax model: calibrate at 2+ depths, use the eye-to-scene offset to
       correct gaze for a given depth (needs a runtime depth source: assumed,
       scene depth, or vergence from a second eye cam)
