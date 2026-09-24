@@ -6,6 +6,9 @@ opencv-contrib-python==4.13.0.92
 pandas==2.2.3
 pyarrow==18.1.0
 
+# Printable jig ChArUco PDFs only (scripts/extras/generate_charuco_board.py --board print).
+reportlab==5.0.1
+
 # Pupil Labs 2D pupil detector — built from a local clone at ../pupil-detectors
 # (path is relative to the repo root, so run pip from there).
 # System prereqs: macOS `brew install eigen opencv`;
