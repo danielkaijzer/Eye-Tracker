@@ -3,8 +3,18 @@
 ## Git & Version Control
 - Use your judgment on committing and pushing to feature branches once a change is complete and verified; ask if unsure.
 - Always ask before pushing to `main`, force-pushing, rewriting pushed history, or deleting branches. Merging PRs is mine.
+- Also ask before pushing to a branch I'm working on elsewhere (e.g. `timestamping` while I test it on the Jetson), even though it's a feature branch.
 - After pushing a new feature branch, open its PR with `gh pr create` (concise title, description of what changed and why, how it was verified). As the branch grows, update the description with `gh pr edit`. Never merge.
 - **Never add attribution to commits or PRs**: no `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" line. I direct the work, so it's credited to me.
+
+## Working with me
+- The physical rig often runs ahead of the repo (the calibration jig and the eye
+  cam's LED both changed without doc updates). Before building on a hardware
+  assumption from docs or code, confirm it with me.
+- Keep the repo lean: prefer deleting dead code and stale docs (git keeps the
+  history) to keeping them around, but don't make changes for their own sake.
+- Process and organization suggestions are welcome when they'd clearly pay off:
+  a sentence or two, not a tangent.
 
 ## TODO tracking
 - `TODO.md` is the single backlog (big features get a `TODO_<topic>.md` spec).
