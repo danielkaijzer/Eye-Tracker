@@ -13,14 +13,14 @@ export an STL. Hardware dimensions are in [MEASUREMENTS.md](MEASUREMENTS.md).
 
 When a new version replaces one of these, move the old file into `archive/`.
 
-## Calibration jig (designed, not yet built)
+## Calibration jig
 
-[`calibration-jig/calibration_jig.scad`](calibration-jig/calibration_jig.scad): a U-shaped
-jig holding two marker panels at a known relative pose, for solving the eye↔scene camera
-extrinsic. `generate_marker_positions.py` parses the `.scad` parameters and writes
-`marker_positions.json` (marker corners in the jig frame); re-run it after editing the
-model. The ChArUco boards for the panels come from
-`scripts/extras/generate_charuco_board.py`.
+The eye↔scene extrinsics jig isn't 3D printed. It's three stainless steel sheets held at
+roughly 90° with L brackets, with printed ChArUco boards pasted on
+(`scripts/extras/generate_charuco_board.py --board print`) so the eye cam and the scene cam
+each see a board on a different sheet. The angles don't need to be exact: the extrinsics
+solver only needs the jig to be rigid. An earlier 3D-printed design was never built; it's
+in git history.
 
 ## Archive
 

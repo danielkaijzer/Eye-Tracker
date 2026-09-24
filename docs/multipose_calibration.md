@@ -128,5 +128,5 @@ confirm — "feels better" isn't measurable. End-to-end:
 Multi-pose reuses the screen + ArUco rig, so coverage is still bounded by screen size and
 marker visibility. A more scalable rig for the model dataset is **world-fixed fiducials**
 — a printed ArUco wall or poster — letting targets span the full scene FOV independently
-of any screen, and dovetailing with the planned extrinsics jig. That's deliberately out
+of any screen, and dovetailing with the extrinsics jig. That's deliberately out
 of scope here; multi-pose is the no-new-hardware step.

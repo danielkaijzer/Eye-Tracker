@@ -39,7 +39,7 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       effective FOV depends on the OV9281's native mode and that crop. It sets
       pye3d's focal length and goes into `metadata.json`: pin the eye mode
       explicitly, then derive the FOV (~70° horizontal lens) or use measured
-      eye intrinsics once the jig exists.
+      eye intrinsics (`calibrate_eye_intrinsics.py`, see the extrinsics item).
 
 ## Timestamping + sync
 
@@ -72,10 +72,22 @@ runs moved gaze by ~900 px.
         corners let it be backfilled for every session once intrinsics exist.
       - Per sample, not per fixation, so head motion during capture shows up
       - Update `docs/dataset_format.md` + a test
-- [ ] Eye↔scene extrinsics: print + assemble the jig (`3d-files/calibration-jig/`),
-      then port `calibrate_extrinsics.py` / `calibrate_eye_intrinsics.py` from
-      `claude/calibration-jig-review` (switch them to JSON output and the shared
-      board specs in `scripts/extras/charuco_boards.py`)
+- [ ] Eye↔scene extrinsics: the jig is built (three steel sheets at ~90°; board
+      sizes not chosen yet). Port `calibrate_extrinsics.py` /
+      `calibrate_eye_intrinsics.py` from `claude/calibration-jig-review` (keep
+      that branch until then). Fixes needed when porting:
+      - Eye frames must match the app's geometry: same eye mode + the 4:3
+        crop/resize to 640x480 (`cameras/utils.py`) and `EYE_CAM_FLIP_VERTICAL`.
+        As written, intrinsics request 640x480 with no crop while extrinsics
+        use the default mode, so K wouldn't match. Pin the eye mode first
+        (see the FOV item above).
+      - Extrinsics must open the scene cam at 1920x1080 like the app; it uses
+        the default mode, which may not match `scene_intrinsics.json`
+      - Read/write JSON (`scene_intrinsics.json`; output to
+        `rig_calibrations/<rig_id>.json` per `docs/dataset_format.md`) instead
+        of `.npz`, and build boards from `scripts/extras/charuco_boards.py`
+      - Then have sessions reference/inline the rig calibration in
+        `metadata.json` (currently null)
 - [ ] Multi-pose coverage at steep head angles: live marker count as pose
       guidance, then more border markers so any 4 well-spread ones work
       (`TODO_multipose_coverage.md`)

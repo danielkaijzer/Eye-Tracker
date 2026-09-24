@@ -97,7 +97,7 @@ docs/                       # Implementation notes, citations, architecture
     citations/                      # references.bib + references.tex
 
 data/                       # Recorded calibration sessions (gitignored)
-3d-files/                   # OpenSCAD camera mounts + calibration jig (see its README)
+3d-files/                   # OpenSCAD camera mounts (see its README)
 requirements.txt            # Python deps (OpenCV, numpy, pupil-detectors)
 ```
 

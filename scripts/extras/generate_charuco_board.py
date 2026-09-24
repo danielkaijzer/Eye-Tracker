@@ -8,7 +8,7 @@
 --board small | medium | large | print
     Exact-size US Letter PDFs for the dual-camera calibration jig ("print"
     makes all three). Print all sizes and check which one each camera detects
-    reliably at the real working distance before laminating.
+    reliably at the real working distance before mounting them on the jig.
     Output: scripts/extras/charuco_print/charuco_<size>.pdf (--out is the folder).
     Needs reportlab (`pip install reportlab`).
 

@@ -152,7 +152,7 @@ down.
 
 - **Eccentricity is an approximation to true gaze angle.** It's measured in the scene-cam
   frame relative to the principal point, assuming the scene cam looks along head-forward
-  and ignoring eye↔scene parallax and target depth. With the planned extrinsics jig (see
+  and ignoring eye↔scene parallax and target depth. With eye↔scene extrinsics from the calibration jig (see
   `docs/data_collection.md`) and a depth estimate, this could become a true
   eye-relative visual angle.
 - **The polynomial itself is the ceiling.** Widening coverage fixes catastrophic
