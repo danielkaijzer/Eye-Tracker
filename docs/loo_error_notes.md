@@ -7,8 +7,8 @@ mapper/LOO walkthrough see [polynomial_gaze_mapping.md](polynomial_gaze_mapping.
 ## Status (2026-06-29)
 
 **LOO is currently implemented correctly.** `PolynomialGazeMapper.fit()`
-(`scripts/eyetracker/gaze/polynomial.py:52`) computes a real leave-one-out error
-in the loop at lines ~79-88. A quick check confirms it returns non-zero errors on
+(`scripts/eyetracker/gaze/polynomial.py`) computes a real leave-one-out error
+in its per-point refit loop. A quick check confirms it returns non-zero errors on
 noisy data (see the regression test at the bottom). This doc is a record so the
 regression below doesn't silently return.
 
@@ -24,11 +24,10 @@ machinery:
 
 1. **Recapture targeting** — the detailed routine's two-pass mode picks the
    worst-N fixations to re-prompt via `np.argsort(per_point_errs)`
-   (`scripts/eyetracker/calibration/routine.py:435`).
+   (`_begin_pass_two` in `scripts/eyetracker/calibration/routine.py`).
 2. **Quality reporting + warning gate** — `_report_and_save` prints
-   `LOO error: avg/max` (`routine.py:472`) and warns if `loo_avg_err` exceeds
-   ~4% of scene width (`routine.py:478-480`).
-3. **Accuracy measurement** — `scripts/extras/measure_gaze_accuracy.py:157-185`
+   `LOO error: avg/max` and warns if `loo_avg_err` exceeds ~4% of scene width.
+3. **Accuracy measurement** — `scripts/extras/measure_gaze_accuracy.py`
    reports avg/max/per-point LOO in px and degrees.
 
 (`persistence.py` does **not** record LOO metrics — it saves the polynomial

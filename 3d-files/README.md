@@ -13,6 +13,15 @@ export an STL. Hardware dimensions are in [MEASUREMENTS.md](MEASUREMENTS.md).
 
 When a new version replaces one of these, move the old file into `archive/`.
 
+## Calibration jig (designed, not yet built)
+
+[`calibration-jig/calibration_jig.scad`](calibration-jig/calibration_jig.scad): a U-shaped
+jig holding two marker panels at a known relative pose, for solving the eye↔scene camera
+extrinsic. `generate_marker_positions.py` parses the `.scad` parameters and writes
+`marker_positions.json` (marker corners in the jig frame); re-run it after editing the
+model. The ChArUco boards for the panels come from
+`scripts/extras/generate_charuco_board.py`.
+
 ## Archive
 
 `archive/` keeps earlier iterations for reference. They aren't maintained.

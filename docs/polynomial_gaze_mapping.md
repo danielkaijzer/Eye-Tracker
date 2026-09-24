@@ -10,7 +10,7 @@ Given a pupil center `(px, py)` in eye-camera pixels, predict where in the scene
 
 The eye is a sphere, the cornea bulges, the eye camera sits at an off-axis angle, and the pupil moves on a curved manifold as gaze sweeps the world. The mapping `(px, py) → (scene_x, scene_y)` is not linear, but over the limited range of pupil motion it is smooth and well-approximated by a low-degree polynomial.
 
-We use a 2nd-degree bivariate polynomial. The feature row (see `scripts/eyetracker/gaze/polynomial.py:15`) is:
+We use a 2nd-degree bivariate polynomial. The feature row (`_build_features` in `scripts/eyetracker/gaze/polynomial.py`) is:
 
 ```
 φ(px, py) = [1, px, py, px², py², px·py]
@@ -25,19 +25,21 @@ scene_y = b₀ + b₁·px + b₂·py + b₃·px² + b₄·py² + b₅·px·py
 
 Two completely independent fits — one for `x`, one for `y`. 12 unknowns total (6 per axis).
 
-### 6 coefficients vs. 12 calibration points
+This doc walks through degree 2, which quick calibration (`c`) uses. Detailed (`d`) and multi-pose (`m`) calibration use degree 3 (10 terms per axis, cubic terms added); the same reasoning applies with 10 in place of 6.
 
-A potential point of confusion: the default calibration pattern (`scripts/eyetracker/calibration/targets.py:23`) is a 4×3 grid = **12 fixation targets**, but each polynomial only has **6 coefficients**. Why so many points if there are only 6 unknowns?
+### 6 coefficients vs. 9 calibration points
 
-Because we are *deliberately overdetermined*. Each fixation gives one `(px, py) → scene_x` equation and one `(px, py) → scene_y` equation. With 12 fixations we have 12 equations per polynomial in 6 unknowns — way more equations than unknowns. There is generally no exact solution; instead `np.linalg.lstsq` finds the 6 coefficients that minimize the total squared error across *all* 12 points simultaneously.
+A potential point of confusion: quick calibration (`c`, `CALIB_QUICK_*` in `scripts/eyetracker/config.py`) is a 3×3 grid = **9 fixation targets**, but each polynomial only has **6 coefficients**. Why so many points if there are only 6 unknowns?
 
-The 6 extra equations are not waste, they are noise averaging:
+Because we are *deliberately overdetermined*. Each fixation gives one `(px, py) → scene_x` equation and one `(px, py) → scene_y` equation. With 9 fixations we have 9 equations per polynomial in 6 unknowns — more equations than unknowns. There is generally no exact solution; instead `np.linalg.lstsq` finds the 6 coefficients that minimize the total squared error across *all* 9 points simultaneously.
+
+The 3 extra equations are not waste, they are noise averaging:
 
 - The pupil center is noisy (per-frame jitter, ellipse fitting variance).
 - The ArUco-derived label is noisy (marker detection shake).
 - The user does not fixate perfectly.
 
-If we used exactly 6 points, the polynomial would pass through every label exactly — including their noise. Those 6 coefficients would chase noise instead of true geometry, and predictions on new pupil positions would be worse. With 12 points the fit is forced to compromise, which pulls it toward the *underlying* pupil-to-scene relationship.
+If we used exactly 6 points, the polynomial would pass through every label exactly — including their noise. Those 6 coefficients would chase noise instead of true geometry, and predictions on new pupil positions would be worse. With 9 points the fit is forced to compromise, which pulls it toward the *underlying* pupil-to-scene relationship.
 
 The hard minimum is 6 points (the `n < 6` guard). Below that the system is underdetermined — infinitely many polynomials fit. Above 6, more is generally better up to a point of diminishing returns.
 
@@ -45,7 +47,7 @@ The hard minimum is 6 points (the `n < 6` guard). Below that the system is under
 
 For each fixation point we need a pair:
 
-- **Input**: pupil center `(px, py)`, median-filtered over a small per-fixation buffer (`scripts/eyetracker/calibration/routine.py:197`).
+- **Input**: pupil center `(px, py)`, median-filtered over a small per-fixation buffer (`SampleCollector` in `scripts/eyetracker/calibration/collector.py`).
 - **Label**: where that fixation target actually appeared in the scene-cam image.
 
 The label is the tricky part — that's where the homography enters.
@@ -56,7 +58,7 @@ We show a red dot at screen-pixel `(tx, ty)` on a monitor. The scene camera know
 
 A flat screen viewed from an arbitrary angle becomes a quadrilateral in the camera image. The screen-plane → camera-image mapping is exactly a **homography** — a 3×3 matrix in projective coordinates.
 
-Four ArUco markers are pinned at the screen corners. In `scripts/eyetracker/scene/aruco_homography.py:103`:
+Four ArUco markers are pinned at the screen corners. In `ArucoHomography._homography_from` (`scripts/eyetracker/scene/aruco_homography.py`):
 
 ```python
 H, _ = cv2.findHomography(screen_pts, scene_pts, method=0)
@@ -73,7 +75,7 @@ scene_u = u·w / w
 scene_v = v·w / w
 ```
 
-That projection happens in `scripts/eyetracker/calibration/routine.py:171-177`. We recompute `H` on every calibration frame because the user's head moves and the screen-to-scene projection drifts. The resulting `(target_u, target_v)` is the "ground truth" scene-cam pixel for each pupil sample.
+That projection happens in `CalibrationRoutine.tick()` (`scripts/eyetracker/calibration/routine.py`). We recompute `H` on every calibration frame because the user's head moves and the screen-to-scene projection drifts. The resulting `(target_u, target_v)` is the "ground truth" scene-cam pixel for each pupil sample.
 
 ## The calibration loop
 
@@ -85,26 +87,26 @@ For each fixation:
 4. `(target_u, target_v) = H · (tx, ty)` — the dot's location in scene-cam pixels.
 5. Median-filter both over a few frames (`SampleCollector`) to get one clean `(pupil_median, scene_median)` pair.
 
-After all accepted fixations (12 from the default grid, fewer if the user skipped any) we have matched arrays of `pupil_pts` and `scene_pts`.
+After all accepted fixations (9 from the quick grid, fewer if the user skipped any) we have matched arrays of `pupil_pts` and `scene_pts`.
 
 ## The fit
 
-In `scripts/eyetracker/gaze/polynomial.py:35-46`: build the design matrix `A` (n rows × 6 columns, each row is `φ(px, py)`), and target vectors `bx` (n scene-x labels) and `by` (n scene-y labels). Solve two least-squares problems:
+In `PolynomialGazeMapper.fit()` (`scripts/eyetracker/gaze/polynomial.py`): build the design matrix `A` (n rows × 6 columns, each row is `φ(px, py)`), and target vectors `bx` (n scene-x labels) and `by` (n scene-y labels). Solve two least-squares problems:
 
 ```python
 cx, _, _, _ = np.linalg.lstsq(A, bx, rcond=None)   # 6 coeffs for scene_x
 cy, _, _, _ = np.linalg.lstsq(A, by, rcond=None)   # 6 coeffs for scene_y
 ```
 
-`np.linalg.lstsq` minimizes `||A·c − b||²` — closed-form, no iteration. With 12 points and 6 unknowns the residual sum of squares has 6 degrees of freedom (n − p = 12 − 6), which is what lets the fit average out per-point noise instead of memorizing it. The hard minimum is 6 points (the `n < 6` guard); below that the system is underdetermined.
+`np.linalg.lstsq` minimizes `||A·c − b||²` — closed-form, no iteration. With 9 points and 6 unknowns the residual sum of squares has 3 degrees of freedom (n − p = 9 − 6), which is what lets the fit average out per-point noise instead of memorizing it. The hard minimum is 6 points (the `n < 6` guard); below that the system is underdetermined.
 
 ## Leave-one-out error
 
-In `scripts/eyetracker/gaze/polynomial.py:48-57`: refit using `n−1` points, predict the held-out one, measure pixel error in scene-cam space. Average and max over all `n` rounds. This is more honest than training residuals — with 6 unknowns and only 6-12 points, training residuals would underestimate true error because the fit is close to interpolating its own training set.
+Also in `PolynomialGazeMapper.fit()`: refit using `n−1` points, predict the held-out one, measure pixel error in scene-cam space. Average and max over all `n` rounds. This is more honest than training residuals — with 6 unknowns and only 9 points, training residuals would underestimate true error because the fit is close to interpolating its own training set.
 
 ## Prediction at runtime
 
-After calibration the homography is gone — it did its job (labeling) and is no longer needed. At runtime (`scripts/eyetracker/gaze/polynomial.py:63-67`):
+After calibration the homography is gone — it did its job (labeling) and is no longer needed. At runtime (`PolynomialGazeMapper.predict()`):
 
 ```python
 feat = [1, px, py, px², py², px·py]

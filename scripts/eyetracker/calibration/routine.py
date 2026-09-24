@@ -16,9 +16,9 @@ Two construction-time modes layer on top of the basic grid:
 - `num_poses > 1` (multi-pose): run the same grid at several head poses in
   one session, pausing in a "pose break" between them, and aggregate every
   captured point into a single fit. See docs/multipose_calibration.md.
-- `fit_on_finish=False` (validation): capture identically but fit nothing and
-  dump the medians to validation_*.npz instead, leaving the live calibration
-  untouched. See docs/calibration_coverage.md.
+- `fit_on_finish=False` (validation): capture identically but fit nothing,
+  saving a normal session tagged `phase: validation` and leaving the live
+  calibration untouched. See docs/calibration_coverage.md.
 """
 import math
 import os
@@ -86,8 +86,8 @@ class CalibrationRoutine:
         # repositions only between poses.
         self.num_poses = num_poses
         # False = collect-only "validation" run: skip fitting / saving the live
-        # calibration and instead dump the captured medians to validation_*.npz
-        # for held-out accuracy measurement.
+        # calibration; the session is tagged phase="validation" for held-out
+        # accuracy measurement.
         self.fit_on_finish = fit_on_finish
         # Used in console output to distinguish quick vs detailed sessions.
         self.label = label

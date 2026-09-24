@@ -2,7 +2,7 @@
 
 Running backlog. Check items off as they land. Put the branch/PR next to an
 item while it's in flight. Detailed per-feature plans get their own
-`TODO_<topic>.md` (e.g. `TODO_calibration_ux.md`).
+`TODO_<topic>.md` (e.g. `TODO_multipose_coverage.md`).
 
 Rig: Jetson Orin (JetPack 6, Ubuntu 22.04) + Philips 221V8LB @ 1920x1080 100 Hz.
 Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
@@ -16,7 +16,7 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
 - [x] Monitor at 100 Hz, persisted in `~/.config/monitors.xml`
 - [x] Headset-on quick calibration on the Jetson
 - [ ] Check the scene exposure hotkeys and `metadata.json` from a real session
-- [ ] Open PR
+- [x] Open PR (#37, merged)
 
 ## Capture architecture
 
@@ -34,6 +34,12 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       `EYE_CAM_RESOLUTION` accordingly.
       Note: the OV9281 has no 30 fps mode (MJPG is 100/120 only; YUYV 10 fps),
       so it already runs at 100 by default, on the Mac too.
+      Also: `EYE_CAM_FOV_DEG` (80° diagonal) is the old Sonix lens. Eye frames
+      are cropped to 4:3 and resized to 640x480 before detection, so the
+      effective FOV depends on the OV9281's native mode and that crop. It sets
+      pye3d's focal length and goes into `metadata.json`: pin the eye mode
+      explicitly, then derive the FOV (~70° horizontal lens) or use measured
+      eye intrinsics once the jig exists.
 
 ## Timestamping + sync
 
@@ -66,6 +72,13 @@ runs moved gaze by ~900 px.
         corners let it be backfilled for every session once intrinsics exist.
       - Per sample, not per fixation, so head motion during capture shows up
       - Update `docs/dataset_format.md` + a test
+- [ ] Eye↔scene extrinsics: print + assemble the jig (`3d-files/calibration-jig/`),
+      then port `calibrate_extrinsics.py` / `calibrate_eye_intrinsics.py` from
+      `claude/calibration-jig-review` (switch them to JSON output and the shared
+      board specs in `scripts/extras/charuco_boards.py`)
+- [ ] Multi-pose coverage at steep head angles: live marker count as pose
+      guidance, then more border markers so any 4 well-spread ones work
+      (`TODO_multipose_coverage.md`)
 - [ ] Parallax model: calibrate at 2+ depths, use the eye-to-scene offset to
       correct gaze for a given depth (needs a runtime depth source: assumed,
       scene depth, or vergence from a second eye cam)
@@ -74,7 +87,7 @@ runs moved gaze by ~900 px.
 
 ## Housekeeping
 
-- [ ] `record.py` / `camera_test.py` / `linux_cam_stream.py`: reuse
-      `cameras/v4l2.py` enumeration instead of hardcoded indexes
-- [ ] Eye cam dropped off USB once with `UVC probe control: -71` (fixed by
-      replug). If it recurs under load, try a powered hub.
+- [ ] Eye cam resets / drops off USB often (~25x on 2026-09-23, incl.
+      `can't read configurations, error -71`), worse through passive USB
+      extension cables. Try a powered hub near the headset / short or active
+      cables. Capture code should also survive a reset (reopen by USB id).

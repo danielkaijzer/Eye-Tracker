@@ -2,17 +2,14 @@
 
 A low-cost, high-precision, low-latency eye tracker prototype. A head-mounted rig pairs an IR eye camera with a forward-facing scene camera. A Python pipeline detects the pupil, calibrates a polynomial mapping from pupil pixels to scene-camera pixels, and renders the gaze locally (OpenCV).
 
+## Platforms
+
+- **Linux (Jetson Orin) is the research rig.** Data collection, time-synced capture and anything that depends on precise timing runs here, and it's the platform the code is developed and tested against.
+- **macOS is a live-demo mode.** Plug the headset into a Mac for a quick calibration and live gaze, with no Jetson or external monitor needed. Research features may be missing or degraded there, and CI doesn't cover it, so run a quick calibration before any demo.
+
 ## Install
 
-**Python** (3.11+ recommended):
-
-```
-brew install eigen opencv                       # macOS system deps for pupil-detectors
-git clone https://github.com/pupil-labs/pupil-detectors.git ../pupil-detectors
-pip install -r requirements.txt                 # installs the local pupil-detectors clone
-```
-
-**Linux** (tested on Jetson Orin, JetPack 6 / Ubuntu 22.04, Python 3.10):
+**Linux** (research rig; tested on Jetson Orin, JetPack 6 / Ubuntu 22.04, Python 3.10):
 
 ```
 sudo apt install libeigen3-dev libopencv-dev cmake python3-dev python3-venv v4l-utils
@@ -23,31 +20,44 @@ pip uninstall -y opencv-python                  # pupil-detectors pulls it in; i
 pip install --force-reinstall --no-deps opencv-contrib-python==4.13.0.92
 ```
 
-If the pupil-detectors build fails with `FindCython ... cython;--version failed`, CMake cached a temp build-env path from an earlier failed attempt. Delete `../pupil-detectors/_skbuild` and retry. If it still fails, install the build deps (`pip install setuptools_scm scikit-build cmake ninja cython`) and use `pip install --no-build-isolation ../pupil-detectors`.
+Your user must be in the `video` group to open `/dev/video*`. Cameras are opened through V4L2 with MJPG. The scene cam is picked by its USB id (`SCENE_UVC_ID` in `config.py`) because each UVC camera shows up as two `/dev/video` nodes. Exposure hotkeys go through `v4l2-ctl`. When launching over SSH, target the attached monitor with `DISPLAY=:0`.
 
-Your user must be in the `video` group to open `/dev/video*`. Cameras are opened through V4L2 with MJPG. The scene cam is picked by its USB id (`SCENE_UVC_ID` in `config.py`) because each UVC camera shows up as two `/dev/video` nodes. Exposure hotkeys go through `v4l2-ctl`, not uvc-util. When launching over SSH, target the attached monitor with `DISPLAY=:0`.
+**macOS** (demo mode):
+
+```
+brew install eigen opencv                       # system deps for pupil-detectors
+git clone https://github.com/pupil-labs/pupil-detectors.git ../pupil-detectors
+pip install -r requirements.txt                 # installs the local pupil-detectors clone
+```
+
+Optional: scene-cam exposure hotkeys need the `uvc-util` binary (build steps in `requirements.txt`; terminal usage in `docs/uvc_exposure_cheatsheet.md`). Without it the app runs with the camera's default exposure.
+
+**Both:** if the pupil-detectors build fails with `FindCython ... cython;--version failed`, CMake cached a temp build-env path from an earlier failed attempt. Delete `../pupil-detectors/_skbuild` and retry. If it still fails, install the build deps (`pip install setuptools_scm scikit-build cmake ninja cython`) and use `pip install --no-build-isolation ../pupil-detectors`.
 
 `requirements.txt` references `../pupil-detectors` as a local path relative to the repo root; adjust the clone location or edit the path if your layout differs. `pye3d` ships from PyPI (built from source on aarch64).
 
-**Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the laptop screen.
+**Hardware** — head-mounted rig with an IR eye camera and a forward-facing scene camera (USB UVC). Calibration draws four ArUco markers (`DICT_4X4_50`, IDs 0/1/2/3) directly onto the calibration screen.
 
 ## Running
 
 ```
-py -m scripts.eyetracker                        # macOS
 DISPLAY=:0 python -m scripts.eyetracker         # Linux, in the `et` env (DISPLAY only needed over SSH)
+python -m scripts.eyetracker                    # macOS demo
 ```
 
 ### In-app controls (eye tracker window)
 
 | Key | Action |
 | --- | --- |
-| `c` | Quick calibration (4×3 grid, degree-2 polynomial) |
+| `c` | Quick calibration (3×3 grid, degree-2 polynomial). During calibration: capture the current point, or start the next pose |
 | `d` | Detailed calibration (5×4 grid, degree-3 polynomial, with worst-point recapture) |
 | `m` | Multi-pose calibration (one grid per head pose, aggregated into one fit — widens field-of-view coverage; press `c` to start each pose) |
 | `v` | Validation capture (collect-only; writes a held-out session tagged `phase: validation` for accuracy measurement, leaves the live calibration untouched) |
 | `l` | Load most recent saved calibration |
 | `r` | Reset the pye3d 3D pupil model (give it ~30 s to reconverge) |
+| `s` / `Esc` | During calibration: skip the current point / abort its capture and retry |
+| `p`, `-` / `=` | During calibration: camera preview, marker brightness |
+| `[` / `]`, `{` / `}` | Scene exposure darker / brighter, fine / coarse |
 | `space` | Pause |
 | `q` | Quit |
 
@@ -58,7 +68,7 @@ For why `m` and `v` exist and how to read the accuracy numbers, see
 ## Repo layout
 
 ```
-scripts/eyetracker/         # Main Python package — `py -m scripts.eyetracker`
+scripts/eyetracker/         # Main Python package — `python -m scripts.eyetracker`
     __main__.py             # Composition root: wires concrete classes into App
     app.py                  # Main loop, frame routing, key dispatch
     config.py               # All tunables (camera, calibration grid, smoother, ArUco)
@@ -67,33 +77,27 @@ scripts/eyetracker/         # Main Python package — `py -m scripts.eyetracker`
     scene/                  # ArUco detection and screen→scene homography
     gaze/                   # Polynomial mapper, 1€ smoother
     calibration/            # State machine, sample collector, persistence
-    dataset.py              # Load per-session labels into one frame (+ Parquet cache)
+    dataset.py              # Read recorded sessions (metadata.json + labels.csv)
     display/                # Tk calibration overlay, cv2 windows
 
 scripts/extras/             # Standalone utilities
-    record.py                       # Sync-recorded eye + scene MP4s
-    analyze_recordings.py           # Per-file stats on a recording dir
     calibrate_scene_intrinsics.py   # ChArUco intrinsics for the scene camera
     generate_charuco_board.py       # Screen board PNG for the above; printable jig boards (PDF)
     charuco_boards.py               # Board specs shared by the generator and calibration scripts
-    gaze_emulator.py                # Synthetic gaze stream for dashboard dev
     measure_gaze_accuracy.py        # Accuracy binned by eccentricity; held-out validation sessions
-    heatmap.py, camera_test.py, linux_cam_stream.py
-
-experimental/               # Paused / on-hold work, kept for reference
-    frontend/               # Next.js 16 / React 19 dashboard (Supabase auth) — see its README
 
 docs/                       # Implementation notes, citations, architecture
     polynomial_gaze_mapping.md      # How the pupil→scene fit works end-to-end
+    loo_error_notes.md              # Leave-one-out error: what it measures, past regression
     calibration_coverage.md         # The coverage problem + eccentricity validation tooling
     multipose_calibration.md        # Multi-pose calibration: widening FOV coverage
+    uvc_exposure_cheatsheet.md      # macOS uvc-util camera controls from the terminal
     data_collection.md              # Fields the data-collection pipeline captures
     dataset_format.md               # On-disk format for sessions + calibration artifacts
     citations/                      # references.bib + references.tex
-    architecture/workspace.dsl      # Structurizr C4 model (C1 / C2 / C3)
 
-data/                       # Recorded MP4s + per-session calibration dumps
-3d-files/                   # STLs for the headset mounts
+data/                       # Recorded calibration sessions (gitignored)
+3d-files/                   # OpenSCAD camera mounts + calibration jig (see its README)
 requirements.txt            # Python deps (OpenCV, numpy, pupil-detectors)
 ```
 

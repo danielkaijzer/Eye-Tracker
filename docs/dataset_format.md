@@ -73,7 +73,7 @@ images), so their `fixation_id` is unreliable there. Richer per-frame fields
 `docs/data_collection.md` are added as the pipeline starts producing them.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
-Produced by the extrinsics jig (a few days out). Schema is defined now; sessions
+Produced by the extrinsics jig (designed in `3d-files/calibration-jig/`, not built yet). Schema is defined now; sessions
 will reference it via `rig_calibration_id` and inline its values into `metadata.json`:
 
 ```json

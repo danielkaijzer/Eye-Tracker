@@ -7,8 +7,14 @@ import math
 
 
 # ---- Eye camera --------------------------------------------------------------
-# 0.3 MP (640x480) with 80° lens. If the spec turns out to be diagonal FOV
-# rather than horizontal, EYE_CAM_FOV_IS_DIAGONAL controls the focal-length math.
+# Eye frames are center-cropped to 4:3 and resized to EYE_CAM_RESOLUTION
+# (cameras/utils.py) before pupil detection, so pupil coordinates and saved eye
+# images are 640x480 whatever mode the camera runs in.
+# STALE: EYE_CAM_FOV_DEG (80° diagonal) is the retired Sonix GC0308's lens. The
+# Arducam OV9281's lens is ~70° horizontal (3d-files/MEASUREMENTS.md), and the
+# effective FOV of the cropped frame depends on the camera's native mode. This
+# value sets pye3d's focal length and is written to metadata.json; see TODO.md
+# (Capture architecture). EYE_CAM_FOV_IS_DIAGONAL controls the focal-length math.
 EYE_CAM_RESOLUTION = (640, 480)
 EYE_CAM_FOV_DEG = 80.0
 EYE_CAM_FOV_IS_DIAGONAL = True
@@ -44,17 +50,18 @@ EYE_UVC_ID = "0x0c45:0x6366"
 SCENE_REQUEST_WIDTH = 1920
 SCENE_REQUEST_HEIGHT = 1080
 
-# USB vendor:product for the uvc-util exposure path (Realtek OV5640). The scene
-# cam is manual-only and `exposure-time-abs` genuinely drives sensor integration
-# time (range 1-10000). SCENE_EXPOSURE is the initial value applied at startup;
-# None leaves the device default.
+# USB vendor:product of the scene cam (Realtek OV5640): picks it on Linux and
+# selects it for exposure control. The scene cam is manual-only and
+# `exposure-time-abs` genuinely drives sensor integration time (range 1-10000).
+# SCENE_EXPOSURE is the initial value applied at startup; None leaves the
+# device default.
 SCENE_UVC_ID = "0x0bda:0xd565"
 SCENE_EXPOSURE = None
 
 
 # ---- Exposure controls -------------------------------------------------------
-# OpenCV/AVFoundation can't set exposure on macOS, so we shell out to uvc-util
-# (jtfrey/uvc-util), selecting the scene cam by SCENE_UVC_ID above. Build it and
+# Linux goes through v4l2-ctl (cameras/v4l2.py). On macOS OpenCV/AVFoundation
+# can't set exposure, so we shell out to uvc-util (jtfrey/uvc-util): build it and
 # put it on PATH or set UVC_UTIL_PATH (see requirements.txt).
 #
 # Two nudge sizes for the '[' / ']' (fine) and '{' / '}' (coarse) hotkeys, each
@@ -158,9 +165,10 @@ CALIB_POSE_GUIDANCE = (
 )
 
 # Validation capture ('v'): runs the detailed grid but fits nothing and leaves
-# the live calibration untouched — it dumps held-out (pupil, scene-label) pairs
-# to validation_*.npz for measure_gaze_accuracy.py. Run it at a steep head
-# angle to probe accuracy outside the calibrated region.
+# the live calibration untouched — it saves a session tagged phase="validation"
+# whose held-out (pupil, scene-label) pairs measure_gaze_accuracy.py reads via
+# --val. Run it at a steep head angle to probe accuracy outside the calibrated
+# region.
 CALIB_VALIDATION_DEGREE = 3
 
 

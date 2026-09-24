@@ -3,8 +3,8 @@
 Capture goes through OpenCV. Exposure does NOT: OpenCV's macOS/AVFoundation
 backend can't drive UVC exposure (set() no-ops, get() returns 0), so when a
 `uvc_id` is given we route exposure through uvc-util instead — it works
-alongside the live capture stream. See UvcExposureController and the
-project_macos_uvc_exposure memory. On Linux, capture uses the V4L2 backend with
+alongside the live capture stream (UvcExposureController in cameras/uvc_util.py,
+macOS demo mode). On Linux, capture uses the V4L2 backend with
 MJPG (uncompressed YUYV can't carry 1080p at usable fps over USB 2), and
 exposure goes through v4l2-ctl (cameras/v4l2.py).
 
