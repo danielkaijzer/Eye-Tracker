@@ -34,6 +34,13 @@ camera** top mount.
   how close the camera can sit. (Working distance is limited by FOV/framing and face
   clearance, not focus.)
 
+## Eye camera — IR illumination
+
+- **One IR LED**, hand-soldered, mounted a bit above the lens (off-axis). Replaced the
+  older eye cam's two side-by-side LEDs.
+- Off-axis, so the pupil images dark (no retroreflection / bright-pupil effect), with a
+  single corneal glint.
+
 ## Eye camera — aim geometry
 
 - **Target lens-tip-to-eye distance:** ~44–51 mm (1.75–2″). Can go closer if desired
@@ -43,7 +50,7 @@ camera** top mount.
 - **Pupil height:** ~27 mm (2.7 cm) above the bottom rod.
 - **Rod spacing:** ~46 mm (4.6 cm) between the bottom and top rods (context / the
   lens-plane height).
-- **Preferred tilt:** ~60° for the internal eye cam (from NOTES.md).
+- **Preferred tilt:** ~60° for the internal eye cam (design notes in `README.md`).
 - **Placement intent:** lens just **below** the eye (out of the sightline), angled
   **up** at the pupil, as close as practical.
 
