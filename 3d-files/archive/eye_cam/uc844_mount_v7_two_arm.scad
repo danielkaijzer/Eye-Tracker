@@ -64,7 +64,7 @@ clip_dx = 0; clip_dz = 0;
 module clip_mock(sy) {
     color("GhostWhite")
         translate([clip_dx, sy*clip_pitch/2, clip_dz])
-            rotate([90, 0, 0]) import("clip_ref.stl");
+            rotate([90, 0, 0]) import("../../eye_cam/clip_ref.stl");
 }
 
 // derived lens tip + report ----------------------------------------------
