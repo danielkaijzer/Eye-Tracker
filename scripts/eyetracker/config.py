@@ -44,6 +44,21 @@ EYE_CAM_FLIP_VERTICAL = False
 # On Linux the startup picker defaults to the camera with this USB id.
 EYE_UVC_ID = "0x0c45:0x6366"
 
+# Eye cam exposure, in UVC exposure_time_absolute units (100 us). The eye cam
+# is always opened in manual mode (its own auto exposure off), so one session
+# has one known exposure (recorded in metadata.json), which pins where a
+# frame's timestamp sits relative to mid-exposure (docs/timestamping.md).
+# None = settle once at startup to EYE_EXPOSURE_TARGET_MEDIAN (software AE,
+# cameras/exposure_settle.py) and keep it; an int = use exactly that. It then
+# only changes on request ('e' re-settles, ',' / '.' step by
+# EYE_EXPOSURE_STEP), never during a calibration. Longest usable exposure is
+# the frame period (99 at 100 fps).
+EYE_EXPOSURE = None
+# Median gray the camera's own AE chose on the eye in well-calibrated sessions
+# (2026-09-23: 89-107; only the glint saturates).
+EYE_EXPOSURE_TARGET_MEDIAN = 96
+EYE_EXPOSURE_STEP = 5
+
 
 # ---- Scene camera ------------------------------------------------------------
 SCENE_REQUEST_WIDTH = 1920

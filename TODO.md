@@ -52,6 +52,17 @@ Eye cam: Arducam OV9281 (`0x0c45:0x6366`). Scene cam: `0x0bda:0xd565`.
       run to run, ~+/-2 ms systematic (edge-dependent). Pair frames by light
       with `eye_frame_ts - 0.0048`. Details: `docs/timestamping.md`. Rerun if
       exposure settings or cameras change.
+- [x] Eye exposure locked per session: manual mode + one-shot software AE at
+      startup (`EYE_EXPOSURE`, `exposure_settle.py`), recorded in metadata. The
+      OV9281's own AE never reports its exposure, so it can't be logged.
+- [ ] Verify the exposure dependence of the eye offset (E/2 model): flash test
+      at `--eye-exposure 20` and `90`; expect ~3.5 ms shift
+- [ ] Absolute eye timestamp-to-light offset (display-independent): an IR LED
+      driven from a Jetson GPIO pin in view of the eye cam, toggled with host
+      timestamps. Matters for click-label timing / latency studies
+- [ ] Click-event labels for passive recording: host input timestamps (evdev
+      events can be switched to CLOCK_MONOTONIC via EVIOCSCLOCKID) + click
+      x,y; pick eye frames in a window before each click
 - [ ] Log calibration-dot onset times on the host clock (flip-accurate at 100 Hz)
 - [ ] Reject corrupt MJPEG frames in the App. `nodrop=1` lets uvcvideo deliver
       frames it flags as corrupt: 3 in one handheld flash run (cables moving),

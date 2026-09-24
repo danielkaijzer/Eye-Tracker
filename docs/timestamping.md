@@ -90,12 +90,24 @@ camera, when its timestamps say the light changed. Five handheld runs on
   relating frames to stimulus times logged the same way, such as dot onsets.
 
 The offset depends on exposure settings. Rerun the test if you change them,
-or if you change cameras. The eye cam normally runs on auto exposure, which
-settles at ~6 ms equivalent when aimed at the monitor, and never reports the
-value it picked (the control keeps the last manual value). So under auto
-exposure the offset is only approximate: a PTS taken after readout shifts by
-half of any exposure change relative to mid-exposure (up to ~5 ms across the
-0.5-9.9 ms range). Pinning the eye exposure removes that uncertainty.
+or if you change cameras. A PTS taken after readout moves by half of any
+exposure change relative to mid-exposure: up to ~5 ms across the eye cam's
+0.5-9.9 ms range. That model is unverified: running the flash test at two eye
+exposures would confirm it.
+
+## Eye exposure is locked per session
+
+The camera's own auto exposure keeps changing exposure mid-recording and never
+reports what it picked; in auto mode the control just keeps the last manual
+value. So the App opens the eye cam in **manual** mode and, with
+`config.EYE_EXPOSURE = None`, runs a one-shot software AE at startup
+(`cameras/exposure_settle.py`). It steps the manual exposure until the eye
+image median reaches `EYE_EXPOSURE_TARGET_MEDIAN` (96, what the camera's AE
+picked on the eye in good sessions), then leaves it. This takes under a second.
+After that it changes only on request: `e` re-settles, `,` / `.` step it. It
+never changes during a calibration. The value is recorded per session
+(`eye_cam.exposure_ms` in `metadata.json`). Settle with the headset on: on
+anything else, the target won't match the eye.
 
 ## Known issues
 

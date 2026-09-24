@@ -23,7 +23,14 @@ from scripts.eyetracker.gaze.base import GazeMapper
 from scripts.eyetracker.gaze.smoothing import OneEuroSmoother
 from scripts.eyetracker.pupil.base import PupilDetector
 from scripts.eyetracker.pupil.gating import ConfidenceGate, JumpGate
-from scripts.eyetracker.config import EXPOSURE_STEP_COARSE, EXPOSURE_STEP_FINE
+from scripts.eyetracker.cameras.exposure_settle import settle_exposure
+from scripts.eyetracker.config import (
+    EXPOSURE_STEP_COARSE,
+    EXPOSURE_STEP_FINE,
+    EYE_EXPOSURE,
+    EYE_EXPOSURE_STEP,
+    EYE_EXPOSURE_TARGET_MEDIAN,
+)
 from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 
@@ -106,7 +113,9 @@ class App:
 
         for routine in self._all_routines:
             routine.jump_gate = self.jump_gate
-            routine.frame_timestamp_info = self._frame_timestamp_info
+            routine.camera_info = self._camera_info
+        if EYE_EXPOSURE is None:
+            self._settle_eye_exposure()
         self.display.open()
 
         print("Controls: 'c' = quick calibrate, 'd' = detailed calibrate, "
@@ -116,6 +125,8 @@ class App:
         print("Scene exposure: '[' / ']' = darker / brighter (fine), "
               "'{' / '}' = darker / brighter (coarse) — also works during "
               "calibration")
+        print("Eye exposure (locked; not during calibration): 'e' = re-settle "
+              "to target, ',' / '.' = darker / brighter")
         print("During calibration: Esc = abort the current point and retry, "
               "'p' = camera preview, '-' / '=' = marker brightness")
 
@@ -210,13 +221,16 @@ class App:
 
     # ---- per-stage helpers --------------------------------------------------
 
-    def _frame_timestamp_info(self) -> dict:
-        """What eye_frame_ts / scene_frame_ts are, for session metadata."""
+    def _camera_info(self) -> dict:
+        """Per-camera capture settings for session metadata: exposure in force
+        and what eye_frame_ts / scene_frame_ts are."""
         info = {}
         for name, cam in (("eye", self.eye_cam), ("scene", self.scene_cam)):
             if cam is not None:
-                info[name] = {"source": cam.last_timestamp_source,
-                              "clock": cam.timestamp_clock_info()}
+                exp = cam.exposure_value()
+                info[name] = {"exposure_ms": None if exp is None else exp / 10.0,
+                              "timestamp_source": cam.last_timestamp_source,
+                              "timestamp_clock": cam.timestamp_clock_info()}
         return info
 
     def _process_eye_frame(self, frame: np.ndarray) -> None:
@@ -365,9 +379,18 @@ class App:
         elif key == 'p':
             if self.routine.is_active:
                 self.overlay.toggle_preview()
+        elif key in ('e', ',', '.'):
+            if self.routine.is_active:
+                # One session, one exposure: it's recorded per session and
+                # sets where frame timestamps sit relative to mid-exposure.
+                print("[exposure] eye exposure is locked during calibration")
+            elif key == 'e':
+                self._settle_eye_exposure()
+            else:
+                self._nudge_eye_exposure(-1 if key == ',' else +1)
         return True
 
-    # ---- exposure controls (scene cam only) ---------------------------------
+    # ---- exposure controls ---------------------------------------------------
 
     def _nudge_exposure(self, direction: int, step_fraction: float) -> None:
         if self.scene_cam is None:
@@ -375,13 +398,39 @@ class App:
         if not self.scene_cam.nudge_exposure(direction, step_fraction):
             print("[exposure] scene cam has no exposure control")
 
+    def _settle_eye_exposure(self) -> None:
+        """Software AE, once: set the eye cam's manual exposure so the eye
+        image median hits the target, then leave it (cameras/exposure_settle)."""
+        res = settle_exposure(self.eye_cam, EYE_EXPOSURE_TARGET_MEDIAN)
+        if res is None:
+            print("[exposure] eye cam has no exposure control; it runs on its "
+                  "own auto exposure (unknown per-frame exposure)")
+            return
+        status = "locked" if res.converged else f"locked ({res.note})"
+        print(f"[exposure] eye: {res.value / 10:.1f} ms, image median "
+              f"{res.median:.0f} (target {EYE_EXPOSURE_TARGET_MEDIAN}), {status}. "
+              "Headset on? 'e' re-settles, ',' / '.' adjust.")
+
+    def _nudge_eye_exposure(self, direction: int) -> None:
+        value = self.eye_cam.exposure_value()
+        if value is None:
+            print("[exposure] eye cam has no exposure control")
+            return
+        if self.eye_cam.set_exposure(value + direction * EYE_EXPOSURE_STEP):
+            print(f"[exposure] eye: {self.eye_cam.exposure_value() / 10:.1f} ms")
+
     def _exposure_overlay_text(self) -> str:
-        """One-line summary of the scene cam's exposure state, or empty if it
-        has no exposure control."""
-        if self.scene_cam is None:
-            return ""
-        state = self.scene_cam.exposure_status()
-        return f"scene:{state}" if state is not None else ""
+        """One-line summary of the eye + scene cams' exposure state; empty
+        parts are dropped for cams without exposure control."""
+        parts = []
+        eye = self.eye_cam.exposure_value()
+        if eye is not None:
+            parts.append(f"eye:{eye / 10:.1f}ms")
+        if self.scene_cam is not None:
+            state = self.scene_cam.exposure_status()
+            if state is not None:
+                parts.append(f"scene:{state}")
+        return "  ".join(parts)
 
     def _handle_load(self) -> None:
         load_calibration_state(self.mapper)

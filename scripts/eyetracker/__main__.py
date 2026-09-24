@@ -46,6 +46,7 @@ from scripts.eyetracker.config import (
     CONF_THRESH,
     EYE_UVC_ID,
     EYE_CAM_FLIP_VERTICAL,
+    EYE_EXPOSURE,
     EYE_CAM_FOCAL_LENGTH_PX,
     HIGH_FPS_MODE,
     PUPIL_BUFFER_SIZE,
@@ -66,10 +67,14 @@ from scripts.eyetracker.scene.aruco_homography import ArucoHomography
 
 
 def _eye_cam_settings() -> CameraSettings:
+    # uvc_id enables the exposure controller, which opens the cam in manual
+    # exposure (see config.EYE_EXPOSURE).
     if HIGH_FPS_MODE:
         return CameraSettings(request_width=320, request_height=240,
-                              request_fps=120, flip_vertical=EYE_CAM_FLIP_VERTICAL)
-    return CameraSettings(flip_vertical=EYE_CAM_FLIP_VERTICAL)
+                              request_fps=120, flip_vertical=EYE_CAM_FLIP_VERTICAL,
+                              uvc_id=EYE_UVC_ID, exposure=EYE_EXPOSURE)
+    return CameraSettings(flip_vertical=EYE_CAM_FLIP_VERTICAL,
+                          uvc_id=EYE_UVC_ID, exposure=EYE_EXPOSURE)
 
 
 def _scene_cam_settings() -> CameraSettings:

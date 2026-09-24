@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -226,3 +226,21 @@ class OpenCVCamera(CameraSource):
 
     def exposure_status(self) -> Optional[str]:
         return self._uvc.status_str() if self._uvc is not None else None
+
+    def exposure_value(self) -> Optional[int]:
+        return self._uvc.value if self._uvc is not None else None
+
+    def exposure_limits(self) -> Optional[Tuple[int, int]]:
+        if self._uvc is None:
+            return None
+        lo, hi = self._uvc.value_range
+        fps = self._cap.get(cv2.CAP_PROP_FPS) if self._cap is not None else 0
+        if fps and fps > 0:
+            hi = min(hi, int(10000 / fps) - 1)    # 100 us units per frame period
+        return lo, hi
+
+    def set_exposure(self, value: int) -> bool:
+        limits = self.exposure_limits()
+        if limits is None:
+            return False
+        return self._uvc.set_exposure(int(max(limits[0], min(limits[1], value))))

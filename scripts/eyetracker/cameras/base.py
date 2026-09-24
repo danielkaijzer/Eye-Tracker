@@ -1,6 +1,6 @@
 """CameraSource interface — frame providers for the App loop."""
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -48,6 +48,20 @@ class CameraSource(ABC):
         """Short description of the camera-clock fit behind last_timestamp
         (rate, residual), or None if the source has none."""
         return None
+
+    # Direct exposure access, in UVC exposure_time_absolute units (100 us).
+    def exposure_value(self) -> Optional[int]:
+        """Current manual exposure, or None if not controllable/unknown."""
+        return None
+
+    def exposure_limits(self) -> Optional[Tuple[int, int]]:
+        """(min, max) usable exposure; max is capped at the frame period,
+        since longer exposures can't fit (the frame rate is pinned)."""
+        return None
+
+    def set_exposure(self, value: int) -> bool:
+        """Set manual exposure (clamped to exposure_limits). True if applied."""
+        return False
 
     def exposure_status(self) -> Optional[str]:
         """Short human label for the on-screen readout (e.g. "exp 400"), or None

@@ -201,6 +201,15 @@ class V4l2ExposureController:
         self._value = got
         return True
 
+    @property
+    def value(self) -> Optional[int]:
+        """Last confirmed exposure value (device units), or None."""
+        return self._value
+
+    @property
+    def value_range(self) -> Tuple[int, int]:
+        return self._value_min, self._value_max
+
     def nudge_exposure(self, direction: int, step_fraction: float) -> bool:
         if self._value is None:
             return False

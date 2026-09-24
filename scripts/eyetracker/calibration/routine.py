@@ -133,9 +133,9 @@ class CalibrationRoutine:
         # Set externally (by App / wiring) once the scene camera reports its
         # actual frame size; used at save time to record scene_width/height.
         self.scene_size: Optional[Tuple[int, int]] = None
-        # Set by the App: returns what the logged frame timestamps are (source
-        # + camera-clock fit per camera), recorded in metadata.json.
-        self.frame_timestamp_info: Optional[Callable[[], dict]] = None
+        # Set by the App: per-camera capture settings (exposure, timestamp
+        # source + clock fit), merged into metadata.json eye_cam / scene_cam.
+        self.camera_info: Optional[Callable[[], dict]] = None
         self.session_dir: Optional[str] = None
         self.labels_path: Optional[str] = None
 
@@ -584,8 +584,7 @@ class CalibrationRoutine:
             aruco_screen_centers=aruco_screen_centers,
             scene_size=self.scene_size,
             screen_size=screen_size,
-            frame_timestamps=(self.frame_timestamp_info()
-                              if self.frame_timestamp_info else None),
+            camera_info=self.camera_info() if self.camera_info else None,
         )
 
     def _discard_pending(self) -> None:

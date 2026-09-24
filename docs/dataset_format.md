@@ -46,10 +46,11 @@ extrinsics jig and richer per-frame capture).
   "subject_id": null, "glasses": null, "headset_model_version": null, "kappa_deg": null,
   "software": { "pupil_detector": null, "pye3d": null, "app_git_sha": null },
   "screen":   { "width": w, "height": h },
-  "scene_cam":{ "width": w, "height": h, "fps": null, "identifier": null },
-  "frame_timestamps": { "eye": { "source": "uvc_pts", "clock": "device clock ... MHz, envelope residual ... ms" },
-                        "scene": { ... } },
-  "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null },
+  "scene_cam":{ "width": w, "height": h, "fps": null, "identifier": null,
+                "exposure_ms": 33.2, "timestamp_source": "uvc_pts",
+                "timestamp_clock": "device clock ... MHz (... ppm), envelope residual ... ms" },
+  "eye_cam":  { "width": w, "height": h, "fps": null, "fov_deg": 80.0, "identifier": null,
+                "exposure_ms": 6.3, "timestamp_source": "uvc_pts", "timestamp_clock": "..." },
   "aruco":    { "dict_name": "...", "dict_id": n, "marker_px": n, "quiet_zone_px": n,
                 "ids": [...], "screen_centers": [[x, y], ...] },
   "superseded_fixation_ids": [],
@@ -85,8 +86,10 @@ drift); that marks when the camera starts sending the frame, a fixed
 per-camera delay after exposure (measured by
 `scripts/extras/flash_sync_test.py`). If the UVC metadata isn't available they
 fall back to host arrival times (~2 ms jitter). `metadata.json`
-`frame_timestamps` records the source and clock fit per camera. Absent in
-sessions recorded before these columns existed.
+`eye_cam` / `scene_cam` record `timestamp_source` + `timestamp_clock` (the
+clock fit) and `exposure_ms` (manual exposure in force, null if unknown). The
+eye cam runs at one locked manual exposure per session (`config.EYE_EXPOSURE`).
+All absent in sessions recorded before these fields existed.
 
 ### `rig_calibrations/<rig_id>.json` — camera-rig calibration (planned)
 Produced by the extrinsics jig (a few days out). Schema is defined now; sessions
